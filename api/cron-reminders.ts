@@ -9,6 +9,17 @@ import { createBot } from '../src/bot.ts';
 import { getDueReminders, markReminderDone } from '../src/vault.ts';
 
 export default async function cronReminders(req: IncomingMessage, res: ServerResponse) {
+  try {
+    return await handle(req, res);
+  } catch (e) {
+    console.error('cron-reminders crashed:', e);
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+  }
+}
+
+async function handle(req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'POST') {
     res.statusCode = 405;
     res.end('method not allowed');
