@@ -1,0 +1,17 @@
+name: Assistant cron — daily briefing
+
+on:
+  # 23:00 UTC = 07:00 Asia/Manila (UTC+8)
+  schedule:
+    - cron: '0 23 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger daily briefing
+        run: >
+          curl -fsS -X POST
+          -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          "${{ vars.APP_URL }}/api/cron-briefing"
