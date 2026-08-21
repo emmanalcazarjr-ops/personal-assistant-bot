@@ -186,19 +186,24 @@ bot.on('message:text', async (ctx) => {
   await ctx.reply(reply);
 });
 
-// Supabase Deno Serve Webhook Entrypoint
-const handleUpdate = webhookCallback(bot, 'std/http');
-
+// Supabase Edge Function: Webhook Handler
 Deno.serve(async (req) => {
   try {
     if (req.method === 'POST') {
-      return await handleUpdate(req);
+      const update = await req.json();
+      await bot.handleUpdate(update);
+      return new Response('OK', { status: 200 });
     }
-    return new Response(JSON.stringify({ status: 'active', bot: '@RushDailyBot', bridge: 'Antigravity + Obsidian' }), {
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return new Response(
+      JSON.stringify({
+        status: 'active',
+        bot: '@RushDailyBot',
+        bridge: 'Antigravity + Obsidian',
+      }),
+      { headers: { 'Content-Type': 'application/json' } }
+    );
   } catch (err) {
     console.error('Edge function error:', err);
-    return new Response('Error', { status: 500 });
+    return new Response('OK', { status: 200 });
   }
 });
