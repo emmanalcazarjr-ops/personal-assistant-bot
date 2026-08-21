@@ -197,49 +197,7 @@ export async function generateBriefing(explicitEdition?: 'morning' | 'evening'):
   };
 
   if (hasDeepSeek()) {
-    try {
-      const prompt = isMorning
-        ? [
-            `You are Rush, a polished, professional yet casually courteous personal AI assistant/butler for Emman ("sir") in ${facts.city}.`,
-            `Today is ${facts.date}. Weather: ${facts.weather}.`,
-            `Portfolio Stats: ${facts.viewsToday} visitors today (${facts.viewsTotal} total).`,
-            `Daily Calorie Target: ${facts.calTarget} kcal cap.`,
-            `AI & Gemini News Focus:\n${facts.newsList}`,
-            `Today's Actionable To-Dos & Antigravity Queue:\n${facts.todoBlock}`,
-            '',
-            'Instructions & Tone:',
-            '1. Greeting: Start with a professional but casual approach: "Good morning, sir. These are the news and your possible to-dos to improve yourself today."',
-            '2. Include Manila date and weather concisely.',
-            '3. AI & Gemini News: Highlight 1-2 top breakthroughs, explaining clearly in 1 sentence how each benefits his AI automation portfolio, projects, or self-improvement.',
-            '4. To-Dos & Nutrition: Present the top prioritized Antigravity tasks & remind him of his 1,850 kcal target (ready to log food photos/descriptions).',
-            '5. Portfolio Pulse: Include visitor stats.',
-            '6. Sign-off: Courteous and motivating (e.g. "I am at your service whenever you are ready to build, sir. — Rush").',
-            'Keep it under 240 words, clean Markdown with bullet points.',
-          ].join('\n')
-        : [
-            `You are Rush, a polished, professional yet casually courteous personal AI assistant/butler for Emman ("sir") in ${facts.city}.`,
-            `Today is ${facts.date}. Weather: ${facts.weather}.`,
-            `Portfolio Stats: ${facts.viewsToday} visitors today (${facts.viewsTotal} total).`,
-            `Calorie Log Today: ${facts.calConsumed} / ${facts.calTarget} kcal (${facts.calRemaining >= 0 ? `${facts.calRemaining} kcal remaining` : `over cap by ${Math.abs(facts.calRemaining)} kcal`}).`,
-            `Evening AI & Gemini Pulse:\n${facts.newsList}`,
-            `Remaining Tasks & Queue Items:\n${facts.todoBlock}`,
-            '',
-            'Instructions & Tone:',
-            '1. Greeting: Start with a professional but casual evening greeting: "Good evening, sir. Here is your evening AI briefing and a quick review of your queue today."',
-            '2. Share 1 key AI/Gemini advancement or practical automation takeaway.',
-            '3. Summarize remaining queue items, daily calorie intake status vs 1,850 kcal cap, and prep for tomorrow\'s desktop session.',
-            '4. End with portfolio visitor stats and a courteous closing. Sign off as "— Rush".',
-            'Keep it under 220 words, clean Markdown.',
-          ].join('\n');
-
-      const text = await summarize(prompt, 600);
-      if (text.trim()) return text.trim();
-    } catch (e) {
-      console.error('DeepSeek briefing failed, falling back to template:', e);
-    }
-  }
-
-  // Fallback Template if DeepSeek is offline
+  // Primary Clean Structured Briefing Format
   const greeting = isMorning
     ? `☀️ *Good morning, sir.* These are the news and your possible to-dos to improve yourself today.`
     : `🌙 *Good evening, sir.* Here is your evening AI wrap-up and status report.`;
