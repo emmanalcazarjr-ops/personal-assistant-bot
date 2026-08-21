@@ -763,3 +763,246 @@ export async function updateQueueItemCategory(
     return null;
   }
 }
+
+// ---------------- Calorie & Nutrition Ledger (1850 kcal default cap) ----------------
+
+const CALORIES_DIR = 'data/calories';
+const CALORIES_CONFIG_PATH = 'data/calories/config.json';
+const CALORIES_LOG_PATH = 'data/calories/LOG.md';
+
+interface CalorieConfigFile {
+  target_calories: number;
+}
+
+function getTodayDateStr(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone }).format(new Date());
+}
+
+function getTimeLabel(): string {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: config.timezone,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(new Date());
+}
+
+/** Get configured daily calorie target (defaults to 1850 kcal) */
+export async function getCalorieTarget(): Promise<number> {
+  try {
+    const raw = await readText(CALORIES_CONFIG_PATH);
+    if (!raw) return 1850;
+    const j = JSON.parse(raw) as CalorieConfigFile;
+    return Number(j.target_calories) || 1850;
+  } catch {
+    return 1850;
+  }
+}
+
+/** Set custom daily calorie target */
+export async function setCalorieTarget(target: number): Promise<number> {
+  try {
+    await updateJson<CalorieConfigFile>(
+      CALORIES_CONFIG_PATH,
+      () => ({ target_calories: target }),
+      { target_calories: 1850 }
+    );
+    return target;
+  } catch (e) {
+    console.error('setCalorieTarget failed:', e);
+    return target;
+  }
+}
+
+/** Get daily calorie data for a given date (defaults to today) */
+export async function getDailyCalories(dateStr?: string): Promise<any> {
+  const date = dateStr || getTodayDateStr();
+  const target = await getCalorieTarget();
+  const filePath = `${CALORIES_DIR}/${date}.json`;
+
+  try {
+    const raw = await readText(filePath);
+    if (!raw) {
+      return {
+        date,
+        target_calories: target,
+        total_calories: 0,
+        total_protein_g: 0,
+        total_carbs_g: 0,
+        total_fat_g: 0,
+        meals: [],
+      };
+    }
+    const data = JSON.parse(raw);
+    data.target_calories = target;
+    return data;
+  } catch {
+    return {
+      date,
+      target_calories: target,
+      total_calories: 0,
+      total_protein_g: 0,
+      total_carbs_g: 0,
+      total_fat_g: 0,
+      meals: [],
+    };
+  }
+}
+
+export function renderCalorieLogMarkdown(daily: any): string {
+  const target = daily.target_calories || 1850;
+  const remaining = target - daily.total_calories;
+  const percent = Math.min(100, Math.round((daily.total_calories / target) * 100));
+
+  const mealsRows =
+    daily.meals.length > 0
+      ? daily.meals
+          .map((m: any, i: number) => {
+            const itemsSummary = (m.items || []).map((it: any) => `${it.name} (${it.portion})`).join(', ');
+            return `| ${i + 1} | ${m.time_label} | **${m.meal_name}** | \`${m.total_calories} kcal\` | \`${m.total_protein_g}g\` | \`${m.total_carbs_g}g\` | \`${m.total_fat_g}g\` | ${itemsSummary} |`;
+          })
+          .join('\n')
+      : '| — | — | *No meals logged yet today* | — | — | — | — | — |';
+
+  return [
+    `# 🥗 Calorie & Nutrition Diary — ${daily.date}`,
+    ``,
+    `> **Daily Goal**: \`${target} kcal\` | **Logged**: \`${daily.total_calories} kcal\` (${percent}%) | **Remaining**: \`${remaining} kcal\``,
+    `> Last updated: ${new Date().toISOString()}`,
+    ``,
+    `### 📊 Macros Today`,
+    `- **Protein**: \`${daily.total_protein_g}g\``,
+    `- **Carbohydrates**: \`${daily.total_carbs_g}g\``,
+    `- **Fat**: \`${daily.total_fat_g}g\``,
+    ``,
+    `---`,
+    ``,
+    `### 🍽 Logged Meals`,
+    `| # | Time | Meal | Calories | Protein | Carbs | Fat | Items |`,
+    `|---|---|---|---|---|---|---|---|`,
+    mealsRows,
+    ``,
+  ].join('\n');
+}
+
+/** Log a meal into today's calorie ledger */
+export async function addMealLog(
+  chatId: number,
+  analysis: any,
+  source: 'text' | 'photo' = 'text',
+  rawInput = ''
+): Promise<{ meal: any; daily: any } | null> {
+  const date = getTodayDateStr();
+  const timeLabel = getTimeLabel();
+  const id = 'm_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  const target = await getCalorieTarget();
+  const filePath = `${CALORIES_DIR}/${date}.json`;
+
+  const meal = {
+    ...analysis,
+    id,
+    timestamp: new Date().toISOString(),
+    time_label: timeLabel,
+    source,
+    raw_input: rawInput,
+  };
+
+  try {
+    let updatedDaily: any = null;
+    await updateJson<any>(
+      filePath,
+      (cur) => {
+        const meals = [...(cur.meals || []), meal];
+        const total_calories = meals.reduce((sum: number, m: any) => sum + (m.total_calories || 0), 0);
+        const total_protein_g = meals.reduce((sum: number, m: any) => sum + (m.total_protein_g || 0), 0);
+        const total_carbs_g = meals.reduce((sum: number, m: any) => sum + (m.total_carbs_g || 0), 0);
+        const total_fat_g = meals.reduce((sum: number, m: any) => sum + (m.total_fat_g || 0), 0);
+
+        const data = {
+          date,
+          target_calories: target,
+          total_calories,
+          total_protein_g,
+          total_carbs_g,
+          total_fat_g,
+          meals,
+        };
+        updatedDaily = data;
+        return data;
+      },
+      {
+        date,
+        target_calories: target,
+        total_calories: 0,
+        total_protein_g: 0,
+        total_carbs_g: 0,
+        total_fat_g: 0,
+        meals: [],
+      }
+    );
+
+    if (updatedDaily) {
+      const logMd = renderCalorieLogMarkdown(updatedDaily);
+      await commitFile(CALORIES_LOG_PATH, logMd, `assistant: update calorie log ${date}`);
+    }
+
+    return { meal, daily: updatedDaily };
+  } catch (e) {
+    console.error('addMealLog failed:', e);
+    return null;
+  }
+}
+
+/** Delete a meal by ID from today's ledger */
+export async function deleteMealLog(mealId: string, dateStr?: string): Promise<any | null> {
+  const date = dateStr || getTodayDateStr();
+  const target = await getCalorieTarget();
+  const filePath = `${CALORIES_DIR}/${date}.json`;
+  const cleanId = mealId.trim().toLowerCase();
+
+  try {
+    let updatedDaily: any = null;
+    await updateJson<any>(
+      filePath,
+      (cur) => {
+        const meals = (cur.meals || []).filter((m: any) => m.id.toLowerCase() !== cleanId);
+        const total_calories = meals.reduce((sum: number, m: any) => sum + (m.total_calories || 0), 0);
+        const total_protein_g = meals.reduce((sum: number, m: any) => sum + (m.total_protein_g || 0), 0);
+        const total_carbs_g = meals.reduce((sum: number, m: any) => sum + (m.total_carbs_g || 0), 0);
+        const total_fat_g = meals.reduce((sum: number, m: any) => sum + (m.total_fat_g || 0), 0);
+
+        const data = {
+          date,
+          target_calories: target,
+          total_calories,
+          total_protein_g,
+          total_carbs_g,
+          total_fat_g,
+          meals,
+        };
+        updatedDaily = data;
+        return data;
+      },
+      {
+        date,
+        target_calories: target,
+        total_calories: 0,
+        total_protein_g: 0,
+        total_carbs_g: 0,
+        total_fat_g: 0,
+        meals: [],
+      }
+    );
+
+    if (updatedDaily) {
+      const logMd = renderCalorieLogMarkdown(updatedDaily);
+      await commitFile(CALORIES_LOG_PATH, logMd, `assistant: delete meal ${mealId}`);
+    }
+
+    return updatedDaily;
+  } catch (e) {
+    console.error('deleteMealLog failed:', e);
+    return null;
+  }
+}
+

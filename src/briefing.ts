@@ -156,12 +156,13 @@ export async function generateBriefing(explicitEdition?: 'morning' | 'evening'):
   const edition = explicitEdition || getBriefingEdition();
   const isMorning = edition === 'morning';
 
-  const [weather, news, views, queueItems, reminders] = await Promise.all([
+  const [weather, news, views, queueItems, reminders, dailyCalories] = await Promise.all([
     fetchWeather(),
     fetchAiNews(),
     fetchPortfolioViews(),
     vault.listQueueItems('pending', 6),
     vault.listUpcomingReminders(Number(config.ownerChatId) || 0, 5),
+    vault.getDailyCalories(),
   ]);
 
   const newsList =
@@ -179,6 +180,8 @@ export async function generateBriefing(explicitEdition?: 'morning' | 'evening'):
       ? pendingTodos.join('\n')
       : '• No urgent tasks in queue! Ready for new ideas or project sprints.';
 
+  const calRemaining = dailyCalories.target_calories - dailyCalories.total_calories;
+
   const facts = {
     edition: isMorning ? '7:00 AM Morning Briefing' : '7:00 PM Evening Wrap-Up',
     date: dateLabel(),
@@ -188,6 +191,9 @@ export async function generateBriefing(explicitEdition?: 'morning' | 'evening'):
     todoBlock,
     viewsToday: views.today,
     viewsTotal: views.total,
+    calConsumed: dailyCalories.total_calories,
+    calTarget: dailyCalories.target_calories,
+    calRemaining,
   };
 
   if (hasDeepSeek()) {
@@ -197,14 +203,15 @@ export async function generateBriefing(explicitEdition?: 'morning' | 'evening'):
             `You are Rush, a polished, professional yet casually courteous personal AI assistant/butler for Emman ("sir") in ${facts.city}.`,
             `Today is ${facts.date}. Weather: ${facts.weather}.`,
             `Portfolio Stats: ${facts.viewsToday} visitors today (${facts.viewsTotal} total).`,
+            `Daily Calorie Target: ${facts.calTarget} kcal cap.`,
             `AI & Gemini News Focus:\n${facts.newsList}`,
             `Today's Actionable To-Dos & Antigravity Queue:\n${facts.todoBlock}`,
             '',
             'Instructions & Tone:',
-            '1. Greeting: Start with a professional but casual approach like: "Good morning, sir. These are the news and your possible to-dos to improve yourself today."',
+            '1. Greeting: Start with a professional but casual approach: "Good morning, sir. These are the news and your possible to-dos to improve yourself today."',
             '2. Include Manila date and weather concisely.',
             '3. AI & Gemini News: Highlight 1-2 top breakthroughs, explaining clearly in 1 sentence how each benefits his AI automation portfolio, projects, or self-improvement.',
-            '4. To-Dos: Present the top prioritized Antigravity tasks & queue items clearly.',
+            '4. To-Dos & Nutrition: Present the top prioritized Antigravity tasks & remind him of his 1,850 kcal target (ready to log food photos/descriptions).',
             '5. Portfolio Pulse: Include visitor stats.',
             '6. Sign-off: Courteous and motivating (e.g. "I am at your service whenever you are ready to build, sir. — Rush").',
             'Keep it under 240 words, clean Markdown with bullet points.',
@@ -213,15 +220,16 @@ export async function generateBriefing(explicitEdition?: 'morning' | 'evening'):
             `You are Rush, a polished, professional yet casually courteous personal AI assistant/butler for Emman ("sir") in ${facts.city}.`,
             `Today is ${facts.date}. Weather: ${facts.weather}.`,
             `Portfolio Stats: ${facts.viewsToday} visitors today (${facts.viewsTotal} total).`,
+            `Calorie Log Today: ${facts.calConsumed} / ${facts.calTarget} kcal (${facts.calRemaining >= 0 ? `${facts.calRemaining} kcal remaining` : `over cap by ${Math.abs(facts.calRemaining)} kcal`}).`,
             `Evening AI & Gemini Pulse:\n${facts.newsList}`,
             `Remaining Tasks & Queue Items:\n${facts.todoBlock}`,
             '',
             'Instructions & Tone:',
             '1. Greeting: Start with a professional but casual evening greeting: "Good evening, sir. Here is your evening AI briefing and a quick review of your queue today."',
             '2. Share 1 key AI/Gemini advancement or practical automation takeaway.',
-            '3. Summarize remaining queue items and prep for tomorrow\'s desktop Antigravity session.',
+            '3. Summarize remaining queue items, daily calorie intake status vs 1,850 kcal cap, and prep for tomorrow\'s desktop session.',
             '4. End with portfolio visitor stats and a courteous closing. Sign off as "— Rush".',
-            'Keep it under 200 words, clean Markdown.',
+            'Keep it under 220 words, clean Markdown.',
           ].join('\n');
 
       const text = await summarize(prompt, 600);
@@ -248,6 +256,7 @@ export async function generateBriefing(explicitEdition?: 'morning' | 'evening'):
     `📋 *Today's Possible To-Dos & Antigravity Queue:*`,
     todoBlock,
     '',
+    `🥗 *Calorie Target:* \`${facts.calConsumed} / ${facts.calTarget} kcal\` (${calRemaining >= 0 ? `${calRemaining} kcal remaining` : `over cap`})`,
     `📊 *Portfolio Pulse:* \`${facts.viewsToday}\` visits today (\`${facts.viewsTotal}\` all-time)`,
     '',
     isMorning

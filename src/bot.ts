@@ -1,6 +1,6 @@
 /**
  * Rush — your personal Telegram assistant.
- * grammY bot with all commands + plain-text AI chat with memory + Antigravity Curation Queue.
+ * grammY bot with all commands + plain-text AI chat with memory + Antigravity Curation Queue + Calorie Tracker.
  * One bot instance; webhook mode on Vercel, long polling in local dev.
  */
 import { Bot, Keyboard } from 'grammy';
@@ -17,11 +17,25 @@ import {
   makeCategoryKeyboard,
   type CurationCategory,
 } from './curation.ts';
+import {
+  analyzeMealPhoto,
+  analyzeMealText,
+  formatDailyCalorieSummary,
+  formatMealLoggedCard,
+  DEFAULT_CALORIE_CAP,
+} from './calories.ts';
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'rushrush0406bot';
 
 const HELP_TEXT = [
   '*Rush — your personal assistant & Antigravity bridge*',
+  '',
+  '🥗 *Calorie & Nutrition Tracker (1850 kcal default cap)*',
+  '• *Send a photo of your meal* — I will automatically analyze portions, estimate calories & macros, and log it to your daily ledger.',
+  '• `/eat <description>` — log what you ate (e.g. `/eat 2 eggs, 1 cup rice, chicken breast`).',
+  '• `/calories` or `/kcal` — view today\'s calorie progress bar, macros, and logged meals.',
+  '• `/setcap <number>` — update your daily calorie goal (default: 1850 kcal).',
+  '• `/delmeal <id>` — delete a logged meal.',
   '',
   '📥 *Curation Queue (Mobile -> Antigravity Desktop)*',
   '• *Share/Forward any link or post* — I\'ll scrape it, classify it (Career/Projects/Ideas/Learning), extract action items, and sync it to your Obsidian vault queue.',
@@ -75,12 +89,14 @@ function systemPrompt(): string {
 function menuKeyboard() {
   return new Keyboard()
     .text('📥 My Queue')
+    .text('🥗 Calorie Tracker')
+    .row()
     .text('📝 Save a note')
-    .row()
     .text('📋 My notes')
-    .text('⏰ Set reminder')
     .row()
+    .text('⏰ Set reminder')
     .text('☀️ Daily briefing')
+    .row()
     .text('❓ Help')
     .resized();
 }
@@ -91,16 +107,16 @@ export function createBot(): Bot {
 
   // ---------- /start ----------
   bot.command('start', async (ctx) => {
-    const name = ctx.from?.first_name || 'there';
+    const name = ctx.from?.first_name || 'sir';
     await ctx.reply(
       [
-        `Hey ${name}! 👋 I'm *Rush*, your personal assistant and Antigravity bridge.`,
+        `Good day, ${name}! 👋 I am *Rush*, your personal AI assistant and Antigravity bridge.`,
         '',
-        '📱 *Doomscroll Curation*: Whenever you find an interesting article, repo, tweet, or idea on your phone, just send or forward it to me. I will analyze whether it belongs to your **career** or **projects** and queue it for your next Antigravity session.',
+        '🥗 *Calorie Counter (1850 kcal cap)*: Send me a photo of your meal or type what you ate (e.g. `/eat 2 eggs and rice`), and I will automatically count your calories, track macros, and keep you on target.',
         '',
-        '💬 You can also chat, save quick notes, set reminders, and ask for daily briefings.',
+        '📱 *Doomscroll Curation*: Whenever you find an interesting article, repo, tweet, or idea on your phone, send or forward it to me. I will triage it for your next Antigravity session.',
         '',
-        'Use `/help` to see all commands.',
+        '💬 `/help` shows all commands.',
       ].join('\n'),
       { reply_markup: menuKeyboard(), parse_mode: 'Markdown' }
     );
@@ -119,8 +135,9 @@ export function createBot(): Bot {
       ? '✅ Obsidian vault connected (GitHub API)'
       : '📁 Local Vault Mode (saving to workspace)';
     const pendingItems = await vault.listQueueItems('pending', 50);
+    const dailyCal = await vault.getDailyCalories();
     await ctx.reply(
-      `*Status*\n\n${ai}\n${vaultStatus}\n📥 *Curation Queue:* ${pendingItems.length} pending item(s)`,
+      `*Status*\n\n${ai}\n${vaultStatus}\n📥 *Curation Queue:* ${pendingItems.length} pending item(s)\n🥗 *Today's Calories:* ${dailyCal.total_calories} / ${dailyCal.target_calories} kcal`,
       { parse_mode: 'Markdown' }
     );
   });
@@ -128,6 +145,61 @@ export function createBot(): Bot {
   // ---------- /id ----------
   bot.command('id', async (ctx) => {
     await ctx.reply(`This chat's id is \`${ctx.chat.id}\``, { parse_mode: 'Markdown' });
+  });
+
+  // ---------- Calorie Tracker Commands ----------
+
+  // View today's calories
+  bot.command(['calories', 'kcal', 'calorie', 'c'], async (ctx) => {
+    await showCalories(ctx);
+  });
+
+  // Log meal by text description
+  bot.command(['eat', 'food', 'log', 'meal'], async (ctx) => {
+    const text = (ctx.match as string)?.trim();
+    if (!text) {
+      await ctx.reply(
+        'Please describe what you ate, sir. For example:\n`/eat 2 scrambled eggs, 1 cup white rice, and chicken breast`',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+    await handleMealTextLogging(ctx, text);
+  });
+
+  // Set custom calorie cap
+  bot.command('setcap', async (ctx) => {
+    const raw = (ctx.match as string)?.trim();
+    const target = parseInt(raw, 10);
+    if (!target || target < 500 || target > 10000) {
+      await ctx.reply('Usage: `/setcap <calories>` (e.g. `/setcap 1850` or `/setcap 2000`)', {
+        parse_mode: 'Markdown',
+      });
+      return;
+    }
+    await vault.setCalorieTarget(target);
+    await ctx.reply(`🎯 *Daily calorie cap updated to ${target} kcal, sir.*`, {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  // Delete logged meal
+  bot.command('delmeal', async (ctx) => {
+    const id = (ctx.match as string)?.trim();
+    if (!id) {
+      await ctx.reply('Usage: `/delmeal <meal_id>` — check IDs with `/calories`.', {
+        parse_mode: 'Markdown',
+      });
+      return;
+    }
+    const updated = await vault.deleteMealLog(id);
+    if (updated) {
+      await ctx.reply(`🗑 *Removed meal from today's ledger, sir.*\nNew total: \`${updated.total_calories} / ${updated.target_calories} kcal\``, {
+        parse_mode: 'Markdown',
+      });
+    } else {
+      await ctx.reply(`Couldn't find meal \`${id}\`.`, { parse_mode: 'Markdown' });
+    }
   });
 
   // ---------- Curation Queue Commands ----------
@@ -283,6 +355,9 @@ export function createBot(): Bot {
   bot.hears('📥 My Queue', async (ctx) => {
     await showQueue(ctx);
   });
+  bot.hears('🥗 Calorie Tracker', async (ctx) => {
+    await showCalories(ctx);
+  });
   bot.hears('📝 Save a note', (ctx) =>
     ctx.reply('Send me the note like: `/note Buy milk and eggs #groceries`')
   );
@@ -304,6 +379,48 @@ export function createBot(): Bot {
     await ctx.reply(text, { parse_mode: 'Markdown' });
   });
   bot.hears('❓ Help', (ctx) => ctx.reply(HELP_TEXT, { parse_mode: 'Markdown' }));
+
+  // ---------- Photo Handler (Food Image Recognition & Calorie Logging) ----------
+  bot.on('message:photo', async (ctx) => {
+    const photos = ctx.message.photo;
+    if (!photos || photos.length === 0) return;
+    const photo = photos[photos.length - 1]; // Highest resolution image
+
+    await ctx.replyWithChatAction('typing');
+    try {
+      const file = await ctx.api.getFile(photo.file_id);
+      if (!file.file_path) throw new Error('No file path returned by Telegram');
+
+      const downloadUrl = `https://api.telegram.org/file/bot${config.botToken}/${file.file_path}`;
+      const res = await fetch(downloadUrl);
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+
+      const buffer = Buffer.from(await res.arrayBuffer());
+      const caption = ctx.message.caption;
+
+      const analysis = await analyzeMealPhoto(buffer, 'image/jpeg', caption);
+      const result = await vault.addMealLog(
+        ctx.chat.id,
+        analysis,
+        'photo',
+        caption || 'Meal photo'
+      );
+
+      if (!result) {
+        await ctx.reply('⚠️ Unable to record meal into your calorie ledger, sir.');
+        return;
+      }
+
+      const card = formatMealLoggedCard(result.meal, result.daily);
+      await ctx.reply(card, { parse_mode: 'Markdown' });
+    } catch (err) {
+      console.error('Meal photo processing error:', err);
+      await ctx.reply(
+        '⚠️ Failed to analyze meal photo. You can also log it by typing `/eat <description>`, sir.',
+        { parse_mode: 'Markdown' }
+      );
+    }
+  });
 
   // ---------- Inline Keyboard Callback Queries ----------
   bot.on('callback_query:data', async (ctx) => {
@@ -344,18 +461,31 @@ export function createBot(): Bot {
     }
   });
 
-  // ---------- Message Handler (Auto-Curation or Chat) ----------
+  // ---------- Message Handler (Food Text, URL Curation, or Plain Chat) ----------
   bot.on('message:text', async (ctx) => {
     const text = ctx.message.text.trim();
     if (!text) return;
 
-    // Check if message is a URL or forwarded article/tweet/post
+    // 1. Check if message is a URL or forwarded article/tweet/post
     const url = extractUrl(text);
-    const isForward = Boolean((ctx.message as any).forward_origin || (ctx.message as any).forward_from || (ctx.message as any).forward_from_chat);
+    const isForward = Boolean(
+      (ctx.message as any).forward_origin ||
+        (ctx.message as any).forward_from ||
+        (ctx.message as any).forward_from_chat
+    );
 
-    // If message contains a URL, automatically trigger the Curation Engine
     if (url) {
       await handleCuration(ctx, text, url, isForward ? 'forward' : 'url');
+      return;
+    }
+
+    // 2. Check if message is a natural language meal description
+    const isMealDescription =
+      /^(i\s+(ate|had|drank|consumed)|ate\s+|had\s+|for\s+(breakfast|lunch|dinner|snack)|just\s+ate)/i.test(
+        text
+      );
+    if (isMealDescription) {
+      await handleMealTextLogging(ctx, text);
       return;
     }
 
@@ -366,7 +496,7 @@ export function createBot(): Bot {
       if (!mentioned && !replyingToBot) return;
     }
 
-    // Normal plain chat with memory
+    // 3. Normal plain chat with memory
     await ctx.replyWithChatAction('typing');
 
     const history = await vault.getRecentMessages(ctx.chat.id, 12);
@@ -382,10 +512,10 @@ export function createBot(): Bot {
     } catch (e) {
       if (e instanceof DeepSeekError && e.message.includes('not set')) {
         reply =
-          "⚠️ My AI brain isn't switched on yet — the DEEPSEEK_API_KEY hasn't been configured.\n\nMeanwhile I can still help with `/queue`, `/note`, `/remind`, `/reminders` and `/briefing`.";
+          "⚠️ My AI brain isn't switched on yet — the DEEPSEEK_API_KEY hasn't been configured.\n\nMeanwhile I can still help with `/calories`, `/eat`, `/queue`, `/note`, `/remind`, and `/briefing`, sir.";
       } else {
         console.error('chat failed:', e);
-        reply = '⚠️ I hit a snag talking to the AI brain. Give me a few seconds and try again!';
+        reply = '⚠️ I hit a snag talking to the AI brain. Give me a few seconds and try again, sir!';
       }
     }
 
@@ -397,12 +527,32 @@ export function createBot(): Bot {
   return bot;
 }
 
-/** Helper to display the pending queue */
+/** Helper to display today's calorie summary */
+async function showCalories(ctx: any) {
+  const daily = await vault.getDailyCalories();
+  const text = formatDailyCalorieSummary(daily);
+  await ctx.reply(text, { parse_mode: 'Markdown' });
+}
+
+/** Helper to handle meal text logging */
+async function handleMealTextLogging(ctx: any, text: string) {
+  await ctx.replyWithChatAction('typing');
+  const analysis = await analyzeMealText(text);
+  const result = await vault.addMealLog(ctx.chat.id, analysis, 'text', text);
+  if (!result) {
+    await ctx.reply('⚠️ Failed to save meal to calorie ledger, sir.');
+    return;
+  }
+  const card = formatMealLoggedCard(result.meal, result.daily);
+  await ctx.reply(card, { parse_mode: 'Markdown' });
+}
+
+/** Helper to display the pending curation queue */
 async function showQueue(ctx: any) {
   const items = await vault.listQueueItems('pending', 15);
   if (items.length === 0) {
     await ctx.reply(
-      '📥 *Your Antigravity Curation Queue is empty!*\n\nShare any link, tweet, article, or project idea to add it to your queue.',
+      '📥 *Your Antigravity Curation Queue is empty, sir.*\n\nShare any link, tweet, article, or project idea to add it to your queue.',
       { parse_mode: 'Markdown' }
     );
     return;
@@ -454,7 +604,7 @@ async function handleCuration(
   );
 
   if (!queueItem) {
-    await ctx.reply('⚠️ Failed to save queue item to vault.');
+    await ctx.reply('⚠️ Failed to save queue item to vault, sir.');
     return;
   }
 
