@@ -1,14 +1,15 @@
-// Supabase Edge Function: Telegram Bot Webhook (Pure Deno + Fetch)
-// 100% Framework-free and bulletproof on Edge runtime
+// Supabase Edge Function: Telegram Bot Webhook (Pure Deno + Fetch + Real-time Calorie Engine)
+// 100% Dynamic data fetched from Supabase database
 
 const BOT_TOKEN = Deno.env.get('BOT_TOKEN') || '8616327589:AAFk7E_fj6CnPyezOr8NFQWwFP8gZ6kC3CM';
 const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY') || 'sk-6e88f8d692db4e418d0b5707be6c4f1e';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || 'https://hulyouteasfuetiqlacq.supabase.co';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1bHlvdXRlYXNmdWV0aXFsYWNxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzI4MTk1NSwiZXhwIjoyMTAyODU3OTU1fQ.QKJMWT03hO3swtQYyxAfrZA9BgcNY-769Vrr9RzRAA8';
+const DEFAULT_CALORIE_CAP = 1850;
 
 const SYSTEM_PROMPT = `
 You are Rush, a polished, professional yet casually courteous personal AI assistant and butler for Emman (address him as "sir").
-You are directly connected to Emman's Antigravity desktop engineering workspace and private Obsidian vault.
+You are directly connected to Emman's Antigravity desktop engineering workspace and Supabase database.
 
 CRITICAL RULE:
 Keep ALL responses as short, crisp, and direct as possible (1-3 sentences maximum).
@@ -34,7 +35,6 @@ async function sendTelegramMessage(chatId: number | string, text: string, parseM
     });
 
     if (!res.ok && parseMode) {
-      // Fallback to plain text if Markdown fails
       await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -46,7 +46,82 @@ async function sendTelegramMessage(chatId: number | string, text: string, parseM
   }
 }
 
-// Helper: Call DeepSeek Chat API
+// Helper: Get today's live total calories and macros from Supabase
+async function getLiveDailyNutrition(): Promise<{ totalKcal: number; totalP: number; totalC: number; totalF: number; count: number }> {
+  try {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date());
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/calorie_logs?log_date=eq.${today}&select=calories,protein,carbs,fat`,
+      {
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+      }
+    );
+
+    if (!res.ok) return { totalKcal: 0, totalP: 0, totalC: 0, totalF: 0, count: 0 };
+    const rows: { calories: number; protein?: number; carbs?: number; fat?: number }[] = await res.json();
+    const totalKcal = rows.reduce((s, r) => s + (Number(r.calories) || 0), 0);
+    const totalP = rows.reduce((s, r) => s + (Number(r.protein) || 0), 0);
+    const totalC = rows.reduce((s, r) => s + (Number(r.carbs) || 0), 0);
+    const totalF = rows.reduce((s, r) => s + (Number(r.fat) || 0), 0);
+    return { totalKcal, totalP, totalC, totalF, count: rows.length };
+  } catch (err) {
+    console.error('getLiveDailyNutrition error:', err);
+    return { totalKcal: 0, totalP: 0, totalC: 0, totalF: 0, count: 0 };
+  }
+}
+
+// Helper: Generate visual progress bar
+function renderProgressBar(current: number, target = DEFAULT_CALORIE_CAP): string {
+  const pct = Math.min(100, Math.round((current / target) * 100));
+  const filled = Math.round(pct / 10);
+  const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
+  return `\`[${bar}]\` **${current.toLocaleString()} / ${target.toLocaleString()} kcal** (${pct}%)`;
+}
+
+// Helper: Estimate meal calories & macros via DeepSeek AI
+async function estimateMealNutrition(description: string): Promise<{ meal: string; calories: number; protein: number; carbs: number; fat: number }> {
+  try {
+    const res = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          {
+            role: 'system',
+            content: `You are an expert nutritionist. Estimate realistic calories and macronutrients for the meal description.
+Return ONLY valid JSON matching this exact structure with no extra markdown:
+{"meal": "Short clean meal name", "calories": 450, "protein": 25, "carbs": 45, "fat": 15}`,
+          },
+          { role: 'user', content: description },
+        ],
+        temperature: 0.1,
+      }),
+    });
+
+    const data = await res.json();
+    const raw = data.choices?.[0]?.message?.content || '{}';
+    const clean = raw.replace(/```json/g, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(clean);
+    return {
+      meal: parsed.meal || description.slice(0, 40),
+      calories: Number(parsed.calories) || 450,
+      protein: Number(parsed.protein) || 20,
+      carbs: Number(parsed.carbs) || 40,
+      fat: Number(parsed.fat) || 15,
+    };
+  } catch {
+    return { meal: description.slice(0, 40), calories: 450, protein: 20, carbs: 40, fat: 15 };
+  }
+}
+
+// Helper: DeepSeek general chat
 async function callDeepSeek(messages: { role: string; content: string }[]) {
   try {
     const res = await fetch('https://api.deepseek.com/chat/completions', {
@@ -64,13 +139,12 @@ async function callDeepSeek(messages: { role: string; content: string }[]) {
     });
     const data = await res.json();
     return data.choices?.[0]?.message?.content || 'Understood, sir. Standing by.';
-  } catch (err) {
-    console.error('DeepSeek error:', err);
+  } catch {
     return 'Understood, sir. Standing by.';
   }
 }
 
-// Helper: Save into Supabase table
+// Helper: Insert record into Supabase table
 async function insertSupabase(table: string, data: Record<string, unknown>) {
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
@@ -91,9 +165,10 @@ async function insertSupabase(table: string, data: Record<string, unknown>) {
 Deno.serve(async (req) => {
   try {
     if (req.method !== 'POST') {
-      return new Response(JSON.stringify({ status: 'active', bot: '@RushDailyBot', version: '2.0-pure-edge' }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({ status: 'active', bot: '@RushDailyBot', engine: 'live-supabase-nutrition' }),
+        { headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
     const update = await req.json();
@@ -109,19 +184,36 @@ Deno.serve(async (req) => {
     // 1. Photo handling (Meal Logging)
     if (msg.photo && msg.photo.length > 0) {
       const caption = msg.caption || 'Meal Photo';
-      await sendTelegramMessage(
-        chatId,
-        `🍽 *Meal Logged, Sir.*\n\n📌 *${caption}*\nEstimated: \`~520 kcal\` _(P: 28g · C: 50g · F: 18g)_\n🎯 Status: \`520 / 1850 kcal\` (1,330 kcal remaining)\n\n_Logged to Supabase & Obsidian, sir._`,
-        'Markdown'
-      );
-      void insertSupabase('calorie_logs', {
-        meal_name: caption,
-        calories: 520,
-        protein: 28,
-        carbs: 50,
-        fat: 18,
+      const estimated = await estimateMealNutrition(caption);
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date());
+
+      // Save to database
+      await insertSupabase('calorie_logs', {
+        meal_name: estimated.meal,
+        calories: estimated.calories,
+        protein: estimated.protein,
+        carbs: estimated.carbs,
+        fat: estimated.fat,
         source: 'telegram_photo',
+        log_date: today,
       });
+
+      // Query live cumulative totals
+      const live = await getLiveDailyNutrition();
+      const remaining = Math.max(0, DEFAULT_CALORIE_CAP - live.totalKcal);
+
+      const reply = [
+        `🍽 *Meal Logged, Sir.*`,
+        '',
+        `📌 *${estimated.meal}*`,
+        `➕ *+${estimated.calories} kcal* _(P: ${estimated.protein}g · C: ${estimated.carbs}g · F: ${estimated.fat}g)_`,
+        '',
+        `📊 *Daily Progress:*`,
+        renderProgressBar(live.totalKcal, DEFAULT_CALORIE_CAP),
+        `🟢 *${remaining.toLocaleString()} kcal remaining* for today.`,
+      ].join('\n');
+
+      await sendTelegramMessage(chatId, reply, 'Markdown');
       return new Response('OK', { status: 200 });
     }
 
@@ -140,31 +232,57 @@ Deno.serve(async (req) => {
       return new Response('OK', { status: 200 });
     }
 
-    // 3. Calorie Queries
-    if (/calories|how many calories|calorie status/i.test(text)) {
-      await sendTelegramMessage(
-        chatId,
-        `🥗 *Daily Calorie Status, Sir:*\n🎯 Cap: \`1,850 kcal\`\n📊 Current: \`0 kcal\` ([░░░░░░░░░░] 0%)\n🟢 \`1,850 kcal remaining\` available for today.`,
-        'Markdown'
-      );
+    // 3. Calorie Queries (e.g. "How many calories left?", "Calories today", "What did I eat?")
+    if (/calories|how many calories|calorie status|what did i eat|my kcal/i.test(text)) {
+      const live = await getLiveDailyNutrition();
+      const remaining = Math.max(0, DEFAULT_CALORIE_CAP - live.totalKcal);
+
+      const reply = [
+        `🥗 *Today's Live Calorie Status, Sir:*`,
+        '',
+        renderProgressBar(live.totalKcal, DEFAULT_CALORIE_CAP),
+        '',
+        `🥩 *Protein:* \`${live.totalP}g\`  ·  🍞 *Carbs:* \`${live.totalC}g\`  ·  🥑 *Fat:* \`${live.totalF}g\``,
+        `🎯 *Remaining Allowance:* \`${remaining.toLocaleString()} kcal\` (from 1,850 kcal cap)`,
+        `📝 *Total Meals Logged Today:* \`${live.count}\``,
+      ].join('\n');
+
+      await sendTelegramMessage(chatId, reply, 'Markdown');
       return new Response('OK', { status: 200 });
     }
 
-    // 4. Food Log
-    if (/^(i ate|ate|had|for lunch|for dinner|for breakfast|eating|drinking)/i.test(text)) {
-      await sendTelegramMessage(
-        chatId,
-        `🍽 *Meal Logged, Sir.*\n\n📌 *${text.slice(0, 45)}*\nEstimated: \`~480 kcal\` _(P: 30g · C: 45g · F: 12g)_\n🎯 Status: \`480 / 1,850 kcal\` (1,370 kcal remaining)\n\n_Logged to Supabase, sir._`,
-        'Markdown'
-      );
-      void insertSupabase('calorie_logs', {
-        meal_name: text.slice(0, 50),
-        calories: 480,
-        protein: 30,
-        carbs: 45,
-        fat: 12,
+    // 4. Food Logging (e.g. "I ate 2 eggs and rice", "Had a chicken breast and salad")
+    if (/^(i ate|ate|had|for lunch|for dinner|for breakfast|eating|drinking|snack:|meal:)/i.test(text)) {
+      const estimated = await estimateMealNutrition(text);
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date());
+
+      // Save to database
+      await insertSupabase('calorie_logs', {
+        meal_name: estimated.meal,
+        calories: estimated.calories,
+        protein: estimated.protein,
+        carbs: estimated.carbs,
+        fat: estimated.fat,
         source: 'telegram_text',
+        log_date: today,
       });
+
+      // Query live cumulative totals
+      const live = await getLiveDailyNutrition();
+      const remaining = Math.max(0, DEFAULT_CALORIE_CAP - live.totalKcal);
+
+      const reply = [
+        `🍽 *Meal Logged, Sir.*`,
+        '',
+        `📌 *${estimated.meal}*`,
+        `➕ *+${estimated.calories} kcal* _(P: ${estimated.protein}g · C: ${estimated.carbs}g · F: ${estimated.fat}g)_`,
+        '',
+        `📊 *Daily Progress:*`,
+        renderProgressBar(live.totalKcal, DEFAULT_CALORIE_CAP),
+        `🟢 *${remaining.toLocaleString()} kcal remaining* for today.`,
+      ].join('\n');
+
+      await sendTelegramMessage(chatId, reply, 'Markdown');
       return new Response('OK', { status: 200 });
     }
 
