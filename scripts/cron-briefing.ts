@@ -1,7 +1,7 @@
 // Cron job: Send 7am & 7pm Daily Briefing
-import { buildDailyBriefing } from '../src/briefing.ts';
+import { generateBriefing } from '../src/briefing.ts';
 
-const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const BOT_TOKEN = process.env.BOT_TOKEN || '8616327589:AAFk7E_fj6CnPyezOr8NFQWwFP8gZ6kC3CM';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '966825617';
 
 async function run() {
@@ -20,10 +20,10 @@ async function run() {
     10
   );
 
-  const isMorning = hourManila < 12;
+  const isMorning = hourManila < 14;
   console.log(`Generating ${isMorning ? 'morning (7 AM)' : 'evening (7 PM)'} briefing for chat ${TELEGRAM_CHAT_ID}...`);
 
-  const briefingText = await buildDailyBriefing(isMorning);
+  const briefingText = await generateBriefing(isMorning ? 'morning' : 'evening');
 
   const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: 'POST',
@@ -36,7 +36,7 @@ async function run() {
   });
 
   const data = await res.json();
-  console.log('Telegram delivery response:', data.ok ? 'SUCCESS' : data);
+  console.log('Telegram delivery result:', data.ok ? 'SUCCESS' : data);
 }
 
 run().catch((err) => {
