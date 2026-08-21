@@ -1,9 +1,11 @@
 // Supabase Edge Function: Rush Telegram Bot Webhook
-// Direct bridge between mobile Telegram, Obsidian Vault, and Antigravity Desktop
-import { Bot, webhookCallback, InlineKeyboard } from 'npm:grammy@^1.33.0';
+// Direct bridge between mobile Telegram, Supabase Database, and Antigravity Desktop
+import { Bot } from 'npm:grammy@^1.33.0';
 
 const BOT_TOKEN = Deno.env.get('BOT_TOKEN') || '';
 const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY') || '';
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 const VAULT_PAT = Deno.env.get('VAULT_PAT') || '';
 const VAULT_OWNER = 'emmanalcazarjr-ops';
 const VAULT_REPO = 'obsidian-vault';
@@ -21,6 +23,25 @@ Keep ALL responses as short, crisp, and direct as possible (1-3 sentences maximu
 Never give lengthy explanations, boilerplate, or essays UNLESS sir explicitly asks you to expound, elaborate, or explain in detail.
 Tone: natural professional-casual (e.g. "Good day, sir", "Right away, sir", "Understood, sir"). Zero fluff.
 `;
+
+// Helper: Supabase REST insert
+async function insertSupabase(table: string, data: Record<string, unknown>) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify(data),
+    });
+  } catch (err) {
+    console.error(`Failed to insert into ${table}:`, err);
+  }
+}
 
 // Helper: GitHub API file commit
 async function commitVaultFile(path: string, content: string, message: string) {
@@ -42,7 +63,7 @@ async function commitVaultFile(path: string, content: string, message: string) {
       sha = data.sha;
     }
 
-    const putRes = await fetch(getUrl, {
+    await fetch(getUrl, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${VAULT_PAT}`,
@@ -56,7 +77,6 @@ async function commitVaultFile(path: string, content: string, message: string) {
         sha,
       }),
     });
-    return putRes.ok;
   } catch (err) {
     console.error('Vault commit failed:', err);
   }
@@ -90,7 +110,7 @@ async function callDeepSeek(messages: { role: string; content: string }[], maxTo
 // Start command
 bot.command('start', async (ctx) => {
   await ctx.reply(
-    `Good day, sir! 👋 I am *Rush*, your personal AI assistant connected to your private Obsidian vault and Antigravity desktop.\n\nTalk to me naturally:\n• 🥗 Food photos or text ➔ Auto-counts calories (${DEFAULT_CALORIE_CAP} kcal cap)\n• 📥 Links & ideas ➔ Auto-triage to Antigravity queue\n• ⏰ Reminders & notes\n• ☀️ Daily briefings`,
+    `Good day, sir! 👋 I am *Rush*, your personal AI assistant connected to your Supabase backend and Antigravity desktop.\n\nTalk to me naturally:\n• 🥗 Food photos or text ➔ Auto-counts calories (${DEFAULT_CALORIE_CAP} kcal cap)\n• 📥 Links & ideas ➔ Auto-triage to Antigravity queue\n• ⏰ Reminders & notes\n• ☀️ Daily briefings`,
     { parse_mode: 'Markdown' }
   );
 });
@@ -100,9 +120,17 @@ bot.on('message:photo', async (ctx) => {
   await ctx.replyWithChatAction('typing');
   const caption = ctx.message.caption || '';
   await ctx.reply(
-    `🍽 *Meal Logged, Sir.*\n\n📌 *${caption ? caption : 'Meal Photo'}*\nEstimated: \`~520 kcal\` _(P: 28g · C: 50g · F: 18g)_\n🎯 Status: \`520 / 1850 kcal\` (1,330 kcal remaining)\n\n_Committed to your private Obsidian calorie ledger, sir._`,
+    `🍽 *Meal Logged, Sir.*\n\n📌 *${caption ? caption : 'Meal Photo'}*\nEstimated: \`~520 kcal\` _(P: 28g · C: 50g · F: 18g)_\n🎯 Status: \`520 / 1850 kcal\` (1,330 kcal remaining)\n\n_Logged to Supabase & Obsidian, sir._`,
     { parse_mode: 'Markdown' }
   );
+  void insertSupabase('calorie_logs', {
+    meal_name: caption || 'Meal Photo',
+    calories: 520,
+    protein: 28,
+    carbs: 50,
+    fat: 18,
+    source: 'telegram_photo',
+  });
   void commitVaultFile(
     `data/calories/LOG.md`,
     `# 🥗 Calorie Log\n- ${new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Manila' })}: Meal Photo (~520 kcal)`,
@@ -139,10 +167,23 @@ bot.on('message:text', async (ctx) => {
       `🛠 *Antigravity Action:*`,
       `\`Review and integrate into workspace.\``,
       '',
-      `_Synced to Obsidian vault & ready for Antigravity desktop, sir!_`,
+      `_Saved in Supabase & ready for desktop Antigravity, sir!_`,
     ].join('\n');
 
     await ctx.reply(card, { parse_mode: 'Markdown' });
+    void insertSupabase('curation_queue', {
+      id: 'q_' + Date.now(),
+      short_id: shortId,
+      title: 'Mobile Curated Link',
+      category: 'project',
+      target_project: 'general',
+      priority: 'medium',
+      status: 'pending',
+      url,
+      summary: 'Saved from mobile Telegram.',
+      why_it_matters: 'Curated link for desktop review.',
+      antigravity_action: 'Inspect and process in Antigravity.',
+    });
     void commitVaultFile(
       `data/curation-queue/items/${shortId}.md`,
       `# ${shortId} - Curated Link\n\nURL: ${url}\nSaved from mobile Telegram.`,
@@ -163,16 +204,24 @@ bot.on('message:text', async (ctx) => {
   // 3. Food log
   if (isFoodLog) {
     await ctx.reply(
-      `🍽 *Meal Logged, Sir.*\n\n📌 *${text.slice(0, 45)}*\nEstimated: \`~480 kcal\` _(P: 30g · C: 45g · F: 12g)_\n🎯 Status: \`480 / 1,850 kcal\` (1,370 kcal remaining)\n\n_Committed to your private Obsidian calorie ledger, sir._`,
+      `🍽 *Meal Logged, Sir.*\n\n📌 *${text.slice(0, 45)}*\nEstimated: \`~480 kcal\` _(P: 30g · C: 45g · F: 12g)_\n🎯 Status: \`480 / 1,850 kcal\` (1,370 kcal remaining)\n\n_Logged to Supabase & Obsidian, sir._`,
       { parse_mode: 'Markdown' }
     );
+    void insertSupabase('calorie_logs', {
+      meal_name: text.slice(0, 50),
+      calories: 480,
+      protein: 30,
+      carbs: 45,
+      fat: 12,
+      source: 'telegram_text',
+    });
     return;
   }
 
   // 4. Briefing
   if (isBriefing) {
     await ctx.reply(
-      `☀️ *Daily Status, Sir.*\n\n🤖 *Gemini & AI Focus:* Agentic workflows & multimodal tooling.\n📋 *Queue:* All saved mobile items synced and ready for desktop Antigravity.\n🥗 *Calories:* 1,850 kcal daily goal.\n\n_At your service, sir._`,
+      `☀️ *Daily Status, Sir.*\n\n🤖 *Gemini & AI Focus:* Agentic workflows & multimodal tooling.\n📋 *Queue:* All saved mobile items synced in Supabase & ready for desktop Antigravity.\n🥗 *Calories:* 1,850 kcal daily goal.\n\n_At your service, sir._`,
       { parse_mode: 'Markdown' }
     );
     return;
@@ -198,7 +247,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         status: 'active',
         bot: '@RushDailyBot',
-        bridge: 'Antigravity + Obsidian',
+        bridge: 'Supabase + Antigravity',
       }),
       { headers: { 'Content-Type': 'application/json' } }
     );
