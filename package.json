@@ -2,7 +2,7 @@
   "name": "personal-assistant-bot",
   "version": "1.0.0",
   "private": true,
-  "description": "Personal Telegram assistant: AI chat with memory (DeepSeek), notes, reminders, daily briefing. grammY + Obsidian vault on Vercel.",
+  "description": "Personal Telegram assistant & Antigravity queue bridge: AI triage, doomscroll curation, chat with memory, notes, reminders. grammY + Obsidian vault on Vercel.",
   "type": "module",
   "engines": {
     "node": ">=18"
@@ -10,14 +10,21 @@
   "scripts": {
     "dev": "tsx scripts/dev.ts",
     "typecheck": "tsc --noEmit",
+    "queue": "node scripts/queue.mjs list",
+    "queue:list": "node scripts/queue.mjs list",
+    "queue:all": "node scripts/queue.mjs list all",
+    "queue:view": "node scripts/queue.mjs view",
+    "queue:done": "node scripts/queue.mjs done",
     "set-webhook": "node scripts/set-webhook.mjs",
     "get-webhook": "node scripts/get-webhook.mjs"
   },
   "dependencies": {
-    "grammy": "^1.33.0"
+    "grammy": "^1.33.0",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.15",
+    "@types/pg": "^8.21.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2"
   }

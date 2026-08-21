@@ -1,32 +1,49 @@
 /**
  * Rush — your personal Telegram assistant.
- * grammY bot with all commands + plain-text AI chat with memory.
+ * grammY bot with all commands + plain-text AI chat with memory + Antigravity Curation Queue.
  * One bot instance; webhook mode on Vercel, long polling in local dev.
  */
-import { Bot, Context, Keyboard } from 'grammy';
+import { Bot, Keyboard } from 'grammy';
 import { config, hasDeepSeek, hasVault } from './config.ts';
 import * as vault from './vault.ts';
 import { chatCompletion, DeepSeekError } from './deepseek.ts';
 import { extractReminderTime, formatDue } from './time.ts';
 import { generateBriefing } from './briefing.ts';
+import {
+  analyzeCurationItem,
+  extractUrl,
+  fetchUrlMetadata,
+  formatTelegramQueueCard,
+  makeCategoryKeyboard,
+  type CurationCategory,
+} from './curation.ts';
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'rushrush0406bot';
 
 const HELP_TEXT = [
-  '*Rush — your personal assistant*',
+  '*Rush — your personal assistant & Antigravity bridge*',
   '',
-  '💬 *Chat* — just send any message and I\'ll answer (I remember our chat).',
-  '📝 */note <text>* — save a quick note (add #tags).',
-  '📋 */notes [search]* — list or search your notes.',
-  '🗑 */delnote <id>* — delete a note.',
-  '⏰ */remind <task> at <time>* — e.g. `/remind water plants at 6pm`, `/remind stretch in 30 minutes`, `/remind call mom tomorrow 8am`.',
-  '📌 */reminders* — show upcoming reminders.',
-  '✅ */done <id>* — mark a reminder done.',
-  '☀️ */briefing* — get your daily briefing right now.',
-  '🧹 */forget* — clear my memory of this chat.',
-  'ℹ️ */status* — check AI + vault status.',
+  '📥 *Curation Queue (Mobile -> Antigravity Desktop)*',
+  '• *Share/Forward any link or post* — I\'ll scrape it, classify it (Career/Projects/Ideas/Learning), extract action items, and sync it to your Obsidian vault queue.',
+  '• `/curate <link or note>` — explicitly curate an item.',
+  '• `/queue` or `/q` — view pending items in your queue.',
+  '• `/qdone <id>` — mark a queue item as done (e.g. `/qdone 101`).',
   '',
-  '_Built with grammY · DeepSeek · Obsidian vault_',
+  '💬 *Chat & Notes*',
+  '• *Plain message* — AI chat with memory.',
+  '• `/note <text>` — save a quick note (#tags supported).',
+  '• `/notes [search]` — list or search your notes.',
+  '• `/delnote <id>` — delete a note.',
+  '',
+  '⏰ *Reminders & Briefing*',
+  '• `/remind <task> at <time>` — set natural language reminder.',
+  '• `/reminders` — show upcoming reminders.',
+  '• `/done <id>` — mark reminder done.',
+  '• `/briefing` — get your daily briefing.',
+  '• `/forget` — clear chat memory.',
+  '• `/status` — check AI + vault status.',
+  '',
+  '_Built with grammY · DeepSeek · Obsidian Vault · Antigravity_',
 ].join('\n');
 
 const REMIND_USAGE = [
@@ -57,12 +74,13 @@ function systemPrompt(): string {
 
 function menuKeyboard() {
   return new Keyboard()
+    .text('📥 My Queue')
     .text('📝 Save a note')
+    .row()
     .text('📋 My notes')
-    .row()
     .text('⏰ Set reminder')
-    .text('☀️ Daily briefing')
     .row()
+    .text('☀️ Daily briefing')
     .text('❓ Help')
     .resized();
 }
@@ -76,13 +94,15 @@ export function createBot(): Bot {
     const name = ctx.from?.first_name || 'there';
     await ctx.reply(
       [
-        `Hey ${name}! 👋 I'm *Rush*, your personal assistant.`,
+        `Hey ${name}! 👋 I'm *Rush*, your personal assistant and Antigravity bridge.`,
         '',
-        'I can chat with you (and remember our conversation), save notes, set reminders, and give you a daily briefing.',
+        '📱 *Doomscroll Curation*: Whenever you find an interesting article, repo, tweet, or idea on your phone, just send or forward it to me. I will analyze whether it belongs to your **career** or **projects** and queue it for your next Antigravity session.',
         '',
-        'Just type a message to chat, or use the buttons below. `/help` shows every command.',
+        '💬 You can also chat, save quick notes, set reminders, and ask for daily briefings.',
+        '',
+        'Use `/help` to see all commands.',
       ].join('\n'),
-      { reply_markup: menuKeyboard() }
+      { reply_markup: menuKeyboard(), parse_mode: 'Markdown' }
     );
     void vault.addMessage(ctx.chat.id, 'system', 'Started the assistant');
   });
@@ -95,13 +115,55 @@ export function createBot(): Bot {
   // ---------- /status ----------
   bot.command('status', async (ctx) => {
     const ai = hasDeepSeek() ? '✅ DeepSeek AI connected' : '❌ DeepSeek AI not configured';
-    const vaultStatus = hasVault() ? '✅ Obsidian vault connected' : '❌ Obsidian vault not connected (missing VAULT_PAT)';
-    await ctx.reply(`*Status*\n\n${ai}\n${vaultStatus}`);
+    const vaultStatus = hasVault()
+      ? '✅ Obsidian vault connected (GitHub API)'
+      : '📁 Local Vault Mode (saving to workspace)';
+    const pendingItems = await vault.listQueueItems('pending', 50);
+    await ctx.reply(
+      `*Status*\n\n${ai}\n${vaultStatus}\n📥 *Curation Queue:* ${pendingItems.length} pending item(s)`,
+      { parse_mode: 'Markdown' }
+    );
   });
 
   // ---------- /id ----------
   bot.command('id', async (ctx) => {
-    await ctx.reply(`This chat's id is \`${ctx.chat.id}\``);
+    await ctx.reply(`This chat's id is \`${ctx.chat.id}\``, { parse_mode: 'Markdown' });
+  });
+
+  // ---------- Curation Queue Commands ----------
+
+  // Explicit curation command
+  bot.command(['curate', 'save'], async (ctx) => {
+    const text = (ctx.match as string)?.trim();
+    if (!text) {
+      await ctx.reply('Send what you want to curate, e.g.:\n`/curate https://github.com/... Next.js auth patterns`', {
+        parse_mode: 'Markdown',
+      });
+      return;
+    }
+    await handleCuration(ctx, text);
+  });
+
+  // View active queue
+  bot.command(['queue', 'q'], async (ctx) => {
+    await showQueue(ctx);
+  });
+
+  // Mark queue item as done
+  bot.command(['qdone', 'qcomplete'], async (ctx) => {
+    const id = (ctx.match as string)?.trim();
+    if (!id) {
+      await ctx.reply('Usage: `/qdone <id>` (e.g. `/qdone 101` or `/qdone Q-101`)', { parse_mode: 'Markdown' });
+      return;
+    }
+    const updated = await vault.updateQueueItemStatus(id, 'done');
+    if (!updated) {
+      await ctx.reply(`Couldn't find item \`#${id}\`. Check your queue with \`/queue\`.`, { parse_mode: 'Markdown' });
+      return;
+    }
+    await ctx.reply(`✅ *Marked [#${updated.short_id}] as Done!*\n\n~~${updated.title}~~\nUpdated in Obsidian vault.`, {
+      parse_mode: 'Markdown',
+    });
   });
 
   // ---------- notes ----------
@@ -117,11 +179,11 @@ export function createBot(): Bot {
     const content = raw.split(/\s+/).filter((w) => !/^#/.test(w)).join(' ').trim() || raw;
     const note = await vault.addNote(ctx.chat.id, content, tags);
     if (!note) {
-      await ctx.reply('⚠️ Couldn\'t save the note — the Obsidian vault isn\'t connected yet (VAULT_PAT missing).');
+      await ctx.reply('⚠️ Couldn\'t save the note.');
       return;
     }
     const tagLine = tags.length ? `\n\n_Tags:_ ${tags.map((t) => `#${t}`).join(' ')}` : '';
-    await ctx.reply(`📝 *Saved note #${note.id}*${tagLine}\n\n${content}`);
+    await ctx.reply(`📝 *Saved note #${note.id}*${tagLine}\n\n${content}`, { parse_mode: 'Markdown' });
   });
 
   bot.command('notes', async (ctx) => {
@@ -175,7 +237,7 @@ export function createBot(): Bot {
     }
     const reminder = await vault.addReminder(ctx.chat.id, parsed.rest, parsed.due);
     if (!reminder) {
-      await ctx.reply('⚠️ Couldn\'t save the reminder — the Obsidian vault isn\'t connected yet (VAULT_PAT missing).');
+      await ctx.reply('⚠️ Couldn\'t save the reminder.');
       return;
     }
     await ctx.reply(
@@ -217,7 +279,10 @@ export function createBot(): Bot {
     await ctx.reply('🧹 Done — I\'ve forgotten our conversation. Fresh start!');
   });
 
-  // ---------- menu buttons ----------
+  // ---------- menu button handlers ----------
+  bot.hears('📥 My Queue', async (ctx) => {
+    await showQueue(ctx);
+  });
   bot.hears('📝 Save a note', (ctx) =>
     ctx.reply('Send me the note like: `/note Buy milk and eggs #groceries`')
   );
@@ -240,10 +305,59 @@ export function createBot(): Bot {
   });
   bot.hears('❓ Help', (ctx) => ctx.reply(HELP_TEXT, { parse_mode: 'Markdown' }));
 
-  // ---------- plain chat with memory ----------
+  // ---------- Inline Keyboard Callback Queries ----------
+  bot.on('callback_query:data', async (ctx) => {
+    const data = ctx.callbackQuery.data;
+    await ctx.answerCallbackQuery();
+
+    if (data.startsWith('qcat:')) {
+      const parts = data.split(':');
+      const itemId = parts[1];
+      const newCategory = parts[2] as CurationCategory;
+      const updated = await vault.updateQueueItemCategory(itemId, newCategory);
+      if (updated) {
+        await ctx.editMessageText(
+          formatTelegramQueueCard(updated) + `\n\n_Updated category to ${newCategory.toUpperCase()}._`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: makeCategoryKeyboard(updated.short_id),
+          }
+        );
+      }
+    } else if (data.startsWith('qdone:')) {
+      const itemId = data.split(':')[1];
+      const updated = await vault.updateQueueItemStatus(itemId, 'done');
+      if (updated) {
+        await ctx.editMessageText(
+          `✅ *[#${updated.short_id}] Marked as Done!*\n\n~~${updated.title}~~\n\n_Completed and updated in Obsidian._`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+    } else if (data.startsWith('qdel:')) {
+      const itemId = data.split(':')[1];
+      const updated = await vault.updateQueueItemStatus(itemId, 'archived');
+      if (updated) {
+        await ctx.editMessageText(`🗑 *[#${updated.short_id}] Archived and removed from queue.*`, {
+          parse_mode: 'Markdown',
+        });
+      }
+    }
+  });
+
+  // ---------- Message Handler (Auto-Curation or Chat) ----------
   bot.on('message:text', async (ctx) => {
     const text = ctx.message.text.trim();
     if (!text) return;
+
+    // Check if message is a URL or forwarded article/tweet/post
+    const url = extractUrl(text);
+    const isForward = Boolean((ctx.message as any).forward_origin || (ctx.message as any).forward_from || (ctx.message as any).forward_from_chat);
+
+    // If message contains a URL, automatically trigger the Curation Engine
+    if (url) {
+      await handleCuration(ctx, text, url, isForward ? 'forward' : 'url');
+      return;
+    }
 
     // In groups, stay quiet unless mentioned or replying to the bot
     if (ctx.chat.type !== 'private') {
@@ -252,6 +366,7 @@ export function createBot(): Bot {
       if (!mentioned && !replyingToBot) return;
     }
 
+    // Normal plain chat with memory
     await ctx.replyWithChatAction('typing');
 
     const history = await vault.getRecentMessages(ctx.chat.id, 12);
@@ -267,7 +382,7 @@ export function createBot(): Bot {
     } catch (e) {
       if (e instanceof DeepSeekError && e.message.includes('not set')) {
         reply =
-          "⚠️ My AI brain isn't switched on yet — the DEEPSEEK_API_KEY hasn't been configured.\n\nMeanwhile I can still help with `/note`, `/remind`, `/reminders` and `/briefing`.";
+          "⚠️ My AI brain isn't switched on yet — the DEEPSEEK_API_KEY hasn't been configured.\n\nMeanwhile I can still help with `/queue`, `/note`, `/remind`, `/reminders` and `/briefing`.";
       } else {
         console.error('chat failed:', e);
         reply = '⚠️ I hit a snag talking to the AI brain. Give me a few seconds and try again!';
@@ -280,4 +395,72 @@ export function createBot(): Bot {
   });
 
   return bot;
+}
+
+/** Helper to display the pending queue */
+async function showQueue(ctx: any) {
+  const items = await vault.listQueueItems('pending', 15);
+  if (items.length === 0) {
+    await ctx.reply(
+      '📥 *Your Antigravity Curation Queue is empty!*\n\nShare any link, tweet, article, or project idea to add it to your queue.',
+      { parse_mode: 'Markdown' }
+    );
+    return;
+  }
+
+  const categoryEmoji: Record<string, string> = {
+    career: '💼',
+    project: '🚀',
+    idea: '💡',
+    learning: '📚',
+    reference: '📌',
+  };
+
+  const lines = items.map((item, idx) => {
+    const icon = categoryEmoji[item.category] || '📌';
+    const prio = item.priority === 'high' ? '🔴' : item.priority === 'medium' ? '🟡' : '🟢';
+    return `${idx + 1}. \`[#${item.short_id}]\` ${icon} *${item.title}* (${item.target_project}) ${prio}\n   👉 _${item.antigravity_action}_`;
+  });
+
+  await ctx.reply(
+    `📥 *Antigravity Curation Queue (${items.length} pending)*\n\n${lines.join('\n\n')}\n\n_Use \`/qdone <id>\` to mark done, or open Antigravity on desktop to execute!_`,
+    { parse_mode: 'Markdown' }
+  );
+}
+
+/** Core curation pipeline runner */
+async function handleCuration(
+  ctx: any,
+  rawText: string,
+  urlOverride?: string,
+  sourceType: 'url' | 'text' | 'forward' = 'text'
+) {
+  await ctx.replyWithChatAction('typing');
+
+  const detectedUrl = urlOverride || extractUrl(rawText);
+  let urlMeta = null;
+
+  if (detectedUrl) {
+    urlMeta = await fetchUrlMetadata(detectedUrl);
+  }
+
+  const analysis = await analyzeCurationItem(rawText, urlMeta);
+  const queueItem = await vault.addQueueItem(
+    ctx.chat.id,
+    analysis,
+    rawText,
+    detectedUrl || undefined,
+    detectedUrl ? (sourceType === 'forward' ? 'forward' : 'url') : 'text'
+  );
+
+  if (!queueItem) {
+    await ctx.reply('⚠️ Failed to save queue item to vault.');
+    return;
+  }
+
+  const cardText = formatTelegramQueueCard(queueItem);
+  await ctx.reply(cardText, {
+    parse_mode: 'Markdown',
+    reply_markup: makeCategoryKeyboard(queueItem.short_id),
+  });
 }
