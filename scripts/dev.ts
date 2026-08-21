@@ -15,6 +15,12 @@ try {
   await bot.api.setMyCommands([
     { command: 'start', description: 'Welcome + menu' },
     { command: 'help', description: 'Show all commands' },
+    { command: 'calories', description: 'Check today\'s calories & macros (1850 kcal cap)' },
+    { command: 'eat', description: 'Log meal description, e.g. /eat 2 eggs and rice' },
+    { command: 'setcap', description: 'Update daily calorie cap (default 1850)' },
+    { command: 'queue', description: 'View Antigravity curation queue' },
+    { command: 'curate', description: 'Curate link or idea for Antigravity' },
+    { command: 'qdone', description: 'Mark curation queue item done' },
     { command: 'note', description: 'Save a note (add #tags)' },
     { command: 'notes', description: 'List or search notes' },
     { command: 'delnote', description: 'Delete a note by id' },
