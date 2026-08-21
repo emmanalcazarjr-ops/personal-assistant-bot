@@ -194,32 +194,33 @@ export async function generateBriefing(explicitEdition?: 'morning' | 'evening'):
     try {
       const prompt = isMorning
         ? [
-            `You are Rush, writing a high-energy, concise 7:00 AM Morning Briefing for Emman Alcazar Jr in ${facts.city}.`,
-            `Today is ${facts.date}.`,
-            `Weather: ${facts.weather}.`,
+            `You are Rush, a polished, professional yet casually courteous personal AI assistant/butler for Emman ("sir") in ${facts.city}.`,
+            `Today is ${facts.date}. Weather: ${facts.weather}.`,
             `Portfolio Stats: ${facts.viewsToday} visitors today (${facts.viewsTotal} total).`,
             `AI & Gemini News Focus:\n${facts.newsList}`,
             `Today's Actionable To-Dos & Antigravity Queue:\n${facts.todoBlock}`,
             '',
-            'Instructions:',
-            '1. Start with a warm morning greeting with date and weather.',
-            '2. Highlight 1-2 top AI/Gemini news items with 1 sentence on why it helps Emman (e.g. improving his portfolio, AI automation workflows, or agentic coding).',
-            '3. List the top prioritized To-Dos / Antigravity actions for today.',
-            '4. End with portfolio visitor count and a crisp, motivating push.',
-            'Keep it under 240 words, readable bullet points, clean Markdown. Sign off as "— Rush".',
+            'Instructions & Tone:',
+            '1. Greeting: Start with a professional but casual approach like: "Good morning, sir. These are the news and your possible to-dos to improve yourself today."',
+            '2. Include Manila date and weather concisely.',
+            '3. AI & Gemini News: Highlight 1-2 top breakthroughs, explaining clearly in 1 sentence how each benefits his AI automation portfolio, projects, or self-improvement.',
+            '4. To-Dos: Present the top prioritized Antigravity tasks & queue items clearly.',
+            '5. Portfolio Pulse: Include visitor stats.',
+            '6. Sign-off: Courteous and motivating (e.g. "I am at your service whenever you are ready to build, sir. — Rush").',
+            'Keep it under 240 words, clean Markdown with bullet points.',
           ].join('\n')
         : [
-            `You are Rush, writing a crisp 7:00 PM Evening Wrap-Up for Emman Alcazar Jr in ${facts.city}.`,
-            `Date: ${facts.date}. Weather: ${facts.weather}.`,
+            `You are Rush, a polished, professional yet casually courteous personal AI assistant/butler for Emman ("sir") in ${facts.city}.`,
+            `Today is ${facts.date}. Weather: ${facts.weather}.`,
             `Portfolio Stats: ${facts.viewsToday} visitors today (${facts.viewsTotal} total).`,
             `Evening AI & Gemini Pulse:\n${facts.newsList}`,
             `Remaining Tasks & Queue Items:\n${facts.todoBlock}`,
             '',
-            'Instructions:',
-            '1. Greet Emman warmly for the evening.',
-            '2. Share 1 key AI/Gemini update or practical automation takeaway.',
-            '3. Summarize remaining queue items / prep for the next Antigravity desktop session.',
-            '4. End with portfolio stats and relaxing wrap-up line. Sign off as "— Rush".',
+            'Instructions & Tone:',
+            '1. Greeting: Start with a professional but casual evening greeting: "Good evening, sir. Here is your evening AI briefing and a quick review of your queue today."',
+            '2. Share 1 key AI/Gemini advancement or practical automation takeaway.',
+            '3. Summarize remaining queue items and prep for tomorrow\'s desktop Antigravity session.',
+            '4. End with portfolio visitor stats and a courteous closing. Sign off as "— Rush".',
             'Keep it under 200 words, clean Markdown.',
           ].join('\n');
 
@@ -231,24 +232,26 @@ export async function generateBriefing(explicitEdition?: 'morning' | 'evening'):
   }
 
   // Fallback Template if DeepSeek is offline
-  const greeting = isMorning ? `☀️ *Good Morning Emman! (7:00 AM Briefing)*` : `🌙 *Good Evening Emman! (7:00 PM Wrap-Up)*`;
+  const greeting = isMorning
+    ? `☀️ *Good morning, sir.* These are the news and your possible to-dos to improve yourself today.`
+    : `🌙 *Good evening, sir.* Here is your evening AI wrap-up and status report.`;
 
   return [
     greeting,
     `📅 _${facts.date}_ · 📍 _${facts.city}_ (${facts.weather})`,
     '',
-    `🤖 *AI & Gemini News (Work & Portfolio Impact):*`,
+    `🤖 *AI & Gemini Developments (Work & Portfolio Impact):*`,
     news.length > 0
       ? news.slice(0, 3).map((n) => `• *${n.title}*${n.url ? `\n  🔗 [Read Article](${n.url})` : ''}`).join('\n')
       : `• Explore latest Gemini function-calling and agent orchestration capabilities in Antigravity.`,
     '',
-    `📋 *Today's To-Dos & Antigravity Queue:*`,
+    `📋 *Today's Possible To-Dos & Antigravity Queue:*`,
     todoBlock,
     '',
     `📊 *Portfolio Pulse:* \`${facts.viewsToday}\` visits today (\`${facts.viewsTotal}\` all-time)`,
     '',
     isMorning
-      ? `🚀 _Have a productive day! Open Antigravity on desktop when ready to build._\n— Rush`
-      : `✨ _Great job today! Rest up or review your notes for tomorrow._\n— Rush`,
+      ? `🚀 _I am at your service whenever you are ready to build on desktop, sir._\n— Rush`
+      : `✨ _Have a restful evening, sir. We will continue advancing tomorrow._\n— Rush`,
   ].join('\n');
 }
