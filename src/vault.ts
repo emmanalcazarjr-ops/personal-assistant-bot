@@ -480,12 +480,12 @@ export function renderInboxMarkdown(items: QueueItem[]): string {
     if (list.length === 0) return `*No active items in this category.*`;
     return list
       .map((item) => {
-        const prioBadge = item.priority === 'high' ? '🔴 **High**' : item.priority === 'medium' ? '🟡 Medium' : '🟢 Low';
+        const prioBadge = item.priority === 'high' ? '🔴 High' : item.priority === 'medium' ? '🟡 Medium' : '🟢 Low';
         const urlPart = item.url ? ` ([link](${item.url}))` : '';
         const targetBadge = `\`[${item.target_project}]\``;
         const whyPart = item.why_it_matters ? `\n   - 🎯 **Why:** ${item.why_it_matters}` : '';
         const actionPart = item.antigravity_action ? `\n   - 🛠 **Antigravity Action:** \`${item.antigravity_action}\`` : '';
-        return `- [ ] **[#${item.short_id}]** **${item.title}** ${targetBadge} — ${prioBadge}${urlPart}${whyPart}${actionPart}`;
+        return `- [ ] **[#${item.short_id}] ${item.title}** ${targetBadge} — ${prioBadge}${urlPart}${whyPart}${actionPart}`;
       })
       .join('\n');
   };
@@ -493,7 +493,7 @@ export function renderInboxMarkdown(items: QueueItem[]): string {
   const renderDoneSection = (list: QueueItem[]) => {
     if (list.length === 0) return `*No completed items yet.*`;
     return list
-      .map((item) => `- [x] ~~**[#${item.short_id}]** ${item.title} \`[${item.target_project}]\`~~`)
+      .map((item) => `- [x] ~~[#${item.short_id}] ${item.title} [${item.target_project}]~~`)
       .join('\n');
   };
 
