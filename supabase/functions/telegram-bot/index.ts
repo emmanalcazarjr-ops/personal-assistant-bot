@@ -115,27 +115,36 @@ bot.command('start', async (ctx) => {
   );
 });
 
+// Error catcher for bot
+bot.catch((err) => {
+  console.error('Bot runtime error:', err);
+});
+
 // Photo handler (Food recognition)
 bot.on('message:photo', async (ctx) => {
-  await ctx.replyWithChatAction('typing');
-  const caption = ctx.message.caption || '';
-  await ctx.reply(
-    `🍽 *Meal Logged, Sir.*\n\n📌 *${caption ? caption : 'Meal Photo'}*\nEstimated: \`~520 kcal\` _(P: 28g · C: 50g · F: 18g)_\n🎯 Status: \`520 / 1850 kcal\` (1,330 kcal remaining)\n\n_Logged to Supabase & Obsidian, sir._`,
-    { parse_mode: 'Markdown' }
-  );
-  void insertSupabase('calorie_logs', {
-    meal_name: caption || 'Meal Photo',
-    calories: 520,
-    protein: 28,
-    carbs: 50,
-    fat: 18,
-    source: 'telegram_photo',
-  });
-  void commitVaultFile(
-    `data/calories/LOG.md`,
-    `# 🥗 Calorie Log\n- ${new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Manila' })}: Meal Photo (~520 kcal)`,
-    'assistant: log meal photo'
-  );
+  try {
+    await ctx.replyWithChatAction('typing');
+    const caption = ctx.message.caption || '';
+    await ctx.reply(
+      `🍽 *Meal Logged, Sir.*\n\n📌 *${caption ? caption : 'Meal Photo'}*\nEstimated: \`~520 kcal\` _(P: 28g · C: 50g · F: 18g)_\n🎯 Status: \`520 / 1850 kcal\` (1,330 kcal remaining)\n\n_Logged to Supabase & Obsidian, sir._`,
+      { parse_mode: 'Markdown' }
+    );
+    void insertSupabase('calorie_logs', {
+      meal_name: caption || 'Meal Photo',
+      calories: 520,
+      protein: 28,
+      carbs: 50,
+      fat: 18,
+      source: 'telegram_photo',
+    });
+    void commitVaultFile(
+      `data/calories/LOG.md`,
+      `# 🥗 Calorie Log\n- ${new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Manila' })}: Meal Photo (~520 kcal)`,
+      'assistant: log meal photo'
+    );
+  } catch (err) {
+    console.error('Photo handler error:', err);
+  }
 });
 
 // Universal text message router
@@ -148,91 +157,105 @@ bot.on('message:text', async (ctx) => {
   const isFoodLog = /^(i ate|ate|had|for lunch|for dinner|for breakfast|eating|drinking)/i.test(text);
   const isBriefing = /briefing|morning report|daily update/i.test(text);
 
-  await ctx.replyWithChatAction('typing');
+  try {
+    await ctx.replyWithChatAction('typing');
 
-  // 1. URL / Curation
-  if (isUrl) {
-    const url = text.match(/(https?:\/\/[^\s]+)/gi)?.[0] || text;
-    const shortId = 'Q-' + Math.floor(100 + Math.random() * 900);
-    const card = [
-      `📥 *Queued for Antigravity* \`[#${shortId}]\``,
-      '',
-      `📌 *Saved Link:* ${url}`,
-      `📂 *Target:* 🚀 Active Project → \`general\``,
-      `⚡ *Priority:* 🟡 Medium`,
-      '',
-      `🎯 *Why this matters:*`,
-      `Relevant reference for your next Antigravity session.`,
-      '',
-      `🛠 *Antigravity Action:*`,
-      `\`Review and integrate into workspace.\``,
-      '',
-      `_Saved in Supabase & ready for desktop Antigravity, sir!_`,
-    ].join('\n');
+    // 1. URL / Curation
+    if (isUrl) {
+      const url = text.match(/(https?:\/\/[^\s]+)/gi)?.[0] || text;
+      const shortId = 'Q-' + Math.floor(100 + Math.random() * 900);
+      const card = [
+        `📥 *Queued for Antigravity* \`[#${shortId}]\``,
+        '',
+        `📌 *Saved Link:* ${url}`,
+        `📂 *Target:* 🚀 Active Project → \`general\``,
+        `⚡ *Priority:* 🟡 Medium`,
+        '',
+        `🎯 *Why this matters:*`,
+        `Relevant reference for your next Antigravity session.`,
+        '',
+        `🛠 *Antigravity Action:*`,
+        `\`Review and integrate into workspace.\``,
+        '',
+        `_Saved in Supabase & ready for desktop Antigravity, sir!_`,
+      ].join('\n');
 
-    await ctx.reply(card, { parse_mode: 'Markdown' });
-    void insertSupabase('curation_queue', {
-      id: 'q_' + Date.now(),
-      short_id: shortId,
-      title: 'Mobile Curated Link',
-      category: 'project',
-      target_project: 'general',
-      priority: 'medium',
-      status: 'pending',
-      url,
-      summary: 'Saved from mobile Telegram.',
-      why_it_matters: 'Curated link for desktop review.',
-      antigravity_action: 'Inspect and process in Antigravity.',
-    });
-    void commitVaultFile(
-      `data/curation-queue/items/${shortId}.md`,
-      `# ${shortId} - Curated Link\n\nURL: ${url}\nSaved from mobile Telegram.`,
-      `assistant: queue item ${shortId}`
-    );
-    return;
+      try {
+        await ctx.reply(card, { parse_mode: 'Markdown' });
+      } catch {
+        await ctx.reply(card);
+      }
+
+      void insertSupabase('curation_queue', {
+        id: 'q_' + Date.now(),
+        short_id: shortId,
+        title: 'Mobile Curated Link',
+        category: 'project',
+        target_project: 'general',
+        priority: 'medium',
+        status: 'pending',
+        url,
+        summary: 'Saved from mobile Telegram.',
+        why_it_matters: 'Curated link for desktop review.',
+        antigravity_action: 'Inspect and process in Antigravity.',
+      });
+      void commitVaultFile(
+        `data/curation-queue/items/${shortId}.md`,
+        `# ${shortId} - Curated Link\n\nURL: ${url}\nSaved from mobile Telegram.`,
+        `assistant: queue item ${shortId}`
+      );
+      return;
+    }
+
+    // 2. Calorie query
+    if (isCalorieQuery) {
+      await ctx.reply(
+        `🥗 *Daily Calorie Status, Sir:*\n🎯 Cap: \`1,850 kcal\`\n📊 Current: \`0 kcal\` ([░░░░░░░░░░] 0%)\n🟢 \`1,850 kcal remaining\` available for today.`,
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
+    // 3. Food log
+    if (isFoodLog) {
+      await ctx.reply(
+        `🍽 *Meal Logged, Sir.*\n\n📌 *${text.slice(0, 45)}*\nEstimated: \`~480 kcal\` _(P: 30g · C: 45g · F: 12g)_\n🎯 Status: \`480 / 1,850 kcal\` (1,370 kcal remaining)\n\n_Logged to Supabase & Obsidian, sir._`,
+        { parse_mode: 'Markdown' }
+      );
+      void insertSupabase('calorie_logs', {
+        meal_name: text.slice(0, 50),
+        calories: 480,
+        protein: 30,
+        carbs: 45,
+        fat: 12,
+        source: 'telegram_text',
+      });
+      return;
+    }
+
+    // 4. Briefing
+    if (isBriefing) {
+      await ctx.reply(
+        `☀️ *Daily Status, Sir.*\n\n🤖 *Gemini & AI Focus:* Agentic workflows & multimodal tooling.\n📋 *Queue:* All saved mobile items synced in Supabase & ready for desktop Antigravity.\n🥗 *Calories:* 1,850 kcal daily goal.\n\n_At your service, sir._`,
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
+    // 5. Conversational Butler Chat
+    const reply = await callDeepSeek([
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: text },
+    ]);
+    try {
+      await ctx.reply(reply, { parse_mode: 'Markdown' });
+    } catch {
+      await ctx.reply(reply);
+    }
+  } catch (err) {
+    console.error('Text handler error:', err);
+    await ctx.reply('Understood, sir. Standing by.');
   }
-
-  // 2. Calorie query
-  if (isCalorieQuery) {
-    await ctx.reply(
-      `🥗 *Daily Calorie Status, Sir:*\n🎯 Cap: \`1,850 kcal\`\n📊 Current: \`0 kcal\` ([░░░░░░░░░░] 0%)\n🟢 \`1,850 kcal remaining\` available for today.`,
-      { parse_mode: 'Markdown' }
-    );
-    return;
-  }
-
-  // 3. Food log
-  if (isFoodLog) {
-    await ctx.reply(
-      `🍽 *Meal Logged, Sir.*\n\n📌 *${text.slice(0, 45)}*\nEstimated: \`~480 kcal\` _(P: 30g · C: 45g · F: 12g)_\n🎯 Status: \`480 / 1,850 kcal\` (1,370 kcal remaining)\n\n_Logged to Supabase & Obsidian, sir._`,
-      { parse_mode: 'Markdown' }
-    );
-    void insertSupabase('calorie_logs', {
-      meal_name: text.slice(0, 50),
-      calories: 480,
-      protein: 30,
-      carbs: 45,
-      fat: 12,
-      source: 'telegram_text',
-    });
-    return;
-  }
-
-  // 4. Briefing
-  if (isBriefing) {
-    await ctx.reply(
-      `☀️ *Daily Status, Sir.*\n\n🤖 *Gemini & AI Focus:* Agentic workflows & multimodal tooling.\n📋 *Queue:* All saved mobile items synced in Supabase & ready for desktop Antigravity.\n🥗 *Calories:* 1,850 kcal daily goal.\n\n_At your service, sir._`,
-      { parse_mode: 'Markdown' }
-    );
-    return;
-  }
-
-  // 5. Conversational Butler Chat
-  const reply = await callDeepSeek([
-    { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: text },
-  ]);
-  await ctx.reply(reply);
 });
 
 // Supabase Edge Function: Webhook Handler
