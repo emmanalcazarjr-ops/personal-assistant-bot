@@ -13,24 +13,8 @@ const bot = createBot();
 
 try {
   await bot.api.setMyCommands([
-    { command: 'start', description: 'Welcome + menu' },
-    { command: 'help', description: 'Show all commands' },
-    { command: 'calories', description: 'Check today\'s calories & macros (1850 kcal cap)' },
-    { command: 'eat', description: 'Log meal description, e.g. /eat 2 eggs and rice' },
-    { command: 'setcap', description: 'Update daily calorie cap (default 1850)' },
-    { command: 'queue', description: 'View Antigravity curation queue' },
-    { command: 'curate', description: 'Curate link or idea for Antigravity' },
-    { command: 'qdone', description: 'Mark curation queue item done' },
-    { command: 'note', description: 'Save a note (add #tags)' },
-    { command: 'notes', description: 'List or search notes' },
-    { command: 'delnote', description: 'Delete a note by id' },
-    { command: 'remind', description: 'Set a reminder, e.g. /remind task at 6pm' },
-    { command: 'reminders', description: 'Show upcoming reminders' },
-    { command: 'done', description: 'Mark a reminder done' },
-    { command: 'briefing', description: 'Get your daily briefing now' },
-    { command: 'forget', description: 'Clear chat memory' },
-    { command: 'status', description: 'Check AI + storage status' },
-    { command: 'id', description: 'Show this chat id' },
+    { command: 'start', description: 'Welcome & Interactive Menu' },
+    { command: 'help', description: 'How to use Rush (natural language guide)' },
   ]);
   console.log('✅ Menu commands registered');
 } catch (e) {

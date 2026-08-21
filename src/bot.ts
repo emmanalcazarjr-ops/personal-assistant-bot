@@ -1,7 +1,7 @@
 /**
  * Rush — your personal Telegram assistant.
- * grammY bot with all commands + plain-text AI chat with memory + Antigravity Curation Queue + Calorie Tracker.
- * One bot instance; webhook mode on Vercel, long polling in local dev.
+ * 100% natural language AI butler + automatic intent analysis (no commands required).
+ * Handles Food/Calories, Career/Curation, Reminders, Notes, and Briefings autonomously.
  */
 import { Bot, Keyboard } from 'grammy';
 import { config, hasDeepSeek, hasVault } from './config.ts';
@@ -24,52 +24,32 @@ import {
   formatMealLoggedCard,
   DEFAULT_CALORIE_CAP,
 } from './calories.ts';
+import { classifyIntent, type IntentResult } from './intent.ts';
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'RushDailyBot';
 
-const HELP_TEXT = [
-  '*Rush — your personal assistant & Antigravity bridge*',
+const NATURAL_GUIDE_TEXT = [
+  '🎩 *Rush — Personal AI Butler & Antigravity Bridge*',
   '',
-  '🥗 *Calorie & Nutrition Tracker (1850 kcal default cap)*',
-  '• *Send a photo of your meal* — I will automatically analyze portions, estimate calories & macros, and log it to your daily ledger.',
-  '• `/eat <description>` — log what you ate (e.g. `/eat 2 eggs, 1 cup rice, chicken breast`).',
-  '• `/calories` or `/kcal` — view today\'s calorie progress bar, macros, and logged meals.',
-  '• `/setcap <number>` — update your daily calorie goal (default: 1850 kcal).',
-  '• `/delmeal <id>` — delete a logged meal.',
+  'You do not need to use any commands, sir! You can simply message me naturally, and I will automatically handle the rest:',
   '',
-  '📥 *Curation Queue (Mobile -> Antigravity Desktop)*',
-  '• *Share/Forward any link or post* — I\'ll scrape it, classify it (Career/Projects/Ideas/Learning), extract action items, and sync it to your Obsidian vault queue.',
-  '• `/curate <link or note>` — explicitly curate an item.',
-  '• `/queue` or `/q` — view pending items in your queue.',
-  '• `/qdone <id>` — mark a queue item as done (e.g. `/qdone 101`).',
+  '🥗 *Food & Calorie Tracking (1,850 kcal cap)*',
+  '• *Send a photo of your plate* ➔ I will automatically estimate portions, calculate calories/macros, and update your daily ledger.',
+  '• *Type what you ate* (e.g. _"Had 2 eggs, 1 cup of white rice, and chicken breast"_) ➔ I log your nutrition and show your live progress bar.',
+  '• *Ask about your intake* (e.g. _"How many calories do I have left today?"_) ➔ I will show your daily breakdown.',
   '',
-  '💬 *Chat & Notes*',
-  '• *Plain message* — AI chat with memory.',
-  '• `/note <text>` — save a quick note (#tags supported).',
-  '• `/notes [search]` — list or search your notes.',
-  '• `/delnote <id>` — delete a note.',
+  '📥 *Career & Antigravity Curation*',
+  '• *Share or forward any link, tweet, repo, or idea* ➔ I triage it into Career/Projects/Ideas/Learning and sync it directly to your desktop Antigravity queue.',
   '',
-  '⏰ *Reminders & Briefing*',
-  '• `/remind <task> at <time>` — set natural language reminder.',
-  '• `/reminders` — show upcoming reminders.',
-  '• `/done <id>` — mark reminder done.',
-  '• `/briefing` — get your daily briefing.',
-  '• `/forget` — clear chat memory.',
-  '• `/status` — check AI + vault status.',
+  '⏰ *Reminders & Notes*',
+  '• *Tell me what to remember* (e.g. _"Remind me to deploy the bot at 6pm"_ or _"Don\'t let me forget the meeting tomorrow at 9am"_).',
+  '• *Jot down a quick thought* (e.g. _"Note: look into Supabase connection pooling #backend"_).',
   '',
-  '_Built with grammY · DeepSeek · Obsidian Vault · Antigravity_',
-].join('\n');
-
-const REMIND_USAGE = [
-  '⏰ *Set a reminder:*',
+  '☀️ *Daily Briefings*',
+  '• *Ask anytime* (e.g. _"Give me my morning briefing"_ or _"What\'s the news today?"_).',
+  '• I also deliver your automatic briefing at **7:00 AM** and **7:00 PM** daily.',
   '',
-  '`/remind <task> at <time>`',
-  '',
-  'Examples:',
-  '• `/remind water the plants at 6pm`',
-  '• `/remind stretch in 30 minutes`',
-  '• `/remind call mom tomorrow 8am`',
-  '• `/remind submit report friday 5pm`',
+  '_At your service, sir._',
 ].join('\n');
 
 function systemPrompt(): string {
@@ -88,16 +68,14 @@ function systemPrompt(): string {
 
 function menuKeyboard() {
   return new Keyboard()
+    .text('🥗 Today\'s Calories')
     .text('📥 My Queue')
-    .text('🥗 Calorie Tracker')
     .row()
-    .text('📝 Save a note')
-    .text('📋 My notes')
+    .text('☀️ Daily Briefing')
+    .text('📋 My Notes')
     .row()
-    .text('⏰ Set reminder')
-    .text('☀️ Daily briefing')
-    .row()
-    .text('❓ Help')
+    .text('⏰ My Reminders')
+    .text('❓ How to use')
     .resized();
 }
 
@@ -105,282 +83,51 @@ export function createBot(): Bot {
   const bot = new Bot(config.botToken);
   bot.catch((err) => console.error('bot error:', err));
 
-  // ---------- /start ----------
+  // Optional start command for new chats
   bot.command('start', async (ctx) => {
     const name = ctx.from?.first_name || 'sir';
     await ctx.reply(
       [
-        `Good day, ${name}! 👋 I am *Rush*, your personal AI assistant and Antigravity bridge.`,
+        `Good day, ${name}! 👋 I am *Rush*, your personal AI assistant and butler.`,
         '',
-        '🥗 *Calorie Counter (1850 kcal cap)*: Send me a photo of your meal or type what you ate (e.g. `/eat 2 eggs and rice`), and I will automatically count your calories, track macros, and keep you on target.',
-        '',
-        '📱 *Doomscroll Curation*: Whenever you find an interesting article, repo, tweet, or idea on your phone, send or forward it to me. I will triage it for your next Antigravity session.',
-        '',
-        '💬 `/help` shows all commands.',
+        'You don\'t need any commands—just talk to me naturally:',
+        '• 📸 Send a food picture or type what you ate to count calories (1,850 kcal cap)',
+        '• 🔗 Share/forward any link or idea to add it to your Antigravity desktop queue',
+        '• ⏰ Ask me to set reminders or take notes',
+        '• 💬 Ask me anything else anytime',
       ].join('\n'),
       { reply_markup: menuKeyboard(), parse_mode: 'Markdown' }
     );
     void vault.addMessage(ctx.chat.id, 'system', 'Started the assistant');
   });
 
-  // ---------- /help ----------
   bot.command('help', async (ctx) => {
-    await ctx.reply(HELP_TEXT, { parse_mode: 'Markdown' });
+    await ctx.reply(NATURAL_GUIDE_TEXT, { parse_mode: 'Markdown' });
   });
 
-  // ---------- /status ----------
-  bot.command('status', async (ctx) => {
-    const ai = hasDeepSeek() ? '✅ DeepSeek AI connected' : '❌ DeepSeek AI not configured';
-    const vaultStatus = hasVault()
-      ? '✅ Obsidian vault connected (GitHub API)'
-      : '📁 Local Vault Mode (saving to workspace)';
-    const pendingItems = await vault.listQueueItems('pending', 50);
-    const dailyCal = await vault.getDailyCalories();
-    await ctx.reply(
-      `*Status*\n\n${ai}\n${vaultStatus}\n📥 *Curation Queue:* ${pendingItems.length} pending item(s)\n🥗 *Today's Calories:* ${dailyCal.total_calories} / ${dailyCal.target_calories} kcal`,
-      { parse_mode: 'Markdown' }
-    );
-  });
-
-  // ---------- /id ----------
-  bot.command('id', async (ctx) => {
-    await ctx.reply(`This chat's id is \`${ctx.chat.id}\``, { parse_mode: 'Markdown' });
-  });
-
-  // ---------- Calorie Tracker Commands ----------
-
-  // View today's calories
-  bot.command(['calories', 'kcal', 'calorie', 'c'], async (ctx) => {
+  // ---------- Menu Button Listeners ----------
+  bot.hears(/🥗 Today's Calories|calories/i, async (ctx) => {
     await showCalories(ctx);
   });
-
-  // Log meal by text description
-  bot.command(['eat', 'food', 'log', 'meal'], async (ctx) => {
-    const text = (ctx.match as string)?.trim();
-    if (!text) {
-      await ctx.reply(
-        'Please describe what you ate, sir. For example:\n`/eat 2 scrambled eggs, 1 cup white rice, and chicken breast`',
-        { parse_mode: 'Markdown' }
-      );
-      return;
-    }
-    await handleMealTextLogging(ctx, text);
-  });
-
-  // Set custom calorie cap
-  bot.command('setcap', async (ctx) => {
-    const raw = (ctx.match as string)?.trim();
-    const target = parseInt(raw, 10);
-    if (!target || target < 500 || target > 10000) {
-      await ctx.reply('Usage: `/setcap <calories>` (e.g. `/setcap 1850` or `/setcap 2000`)', {
-        parse_mode: 'Markdown',
-      });
-      return;
-    }
-    await vault.setCalorieTarget(target);
-    await ctx.reply(`🎯 *Daily calorie cap updated to ${target} kcal, sir.*`, {
-      parse_mode: 'Markdown',
-    });
-  });
-
-  // Delete logged meal
-  bot.command('delmeal', async (ctx) => {
-    const id = (ctx.match as string)?.trim();
-    if (!id) {
-      await ctx.reply('Usage: `/delmeal <meal_id>` — check IDs with `/calories`.', {
-        parse_mode: 'Markdown',
-      });
-      return;
-    }
-    const updated = await vault.deleteMealLog(id);
-    if (updated) {
-      await ctx.reply(`🗑 *Removed meal from today's ledger, sir.*\nNew total: \`${updated.total_calories} / ${updated.target_calories} kcal\``, {
-        parse_mode: 'Markdown',
-      });
-    } else {
-      await ctx.reply(`Couldn't find meal \`${id}\`.`, { parse_mode: 'Markdown' });
-    }
-  });
-
-  // ---------- Curation Queue Commands ----------
-
-  // Explicit curation command
-  bot.command(['curate', 'save'], async (ctx) => {
-    const text = (ctx.match as string)?.trim();
-    if (!text) {
-      await ctx.reply('Send what you want to curate, e.g.:\n`/curate https://github.com/... Next.js auth patterns`', {
-        parse_mode: 'Markdown',
-      });
-      return;
-    }
-    await handleCuration(ctx, text);
-  });
-
-  // View active queue
-  bot.command(['queue', 'q'], async (ctx) => {
+  bot.hears(/📥 My Queue|queue/i, async (ctx) => {
     await showQueue(ctx);
   });
-
-  // Mark queue item as done
-  bot.command(['qdone', 'qcomplete'], async (ctx) => {
-    const id = (ctx.match as string)?.trim();
-    if (!id) {
-      await ctx.reply('Usage: `/qdone <id>` (e.g. `/qdone 101` or `/qdone Q-101`)', { parse_mode: 'Markdown' });
-      return;
-    }
-    const updated = await vault.updateQueueItemStatus(id, 'done');
-    if (!updated) {
-      await ctx.reply(`Couldn't find item \`#${id}\`. Check your queue with \`/queue\`.`, { parse_mode: 'Markdown' });
-      return;
-    }
-    await ctx.reply(`✅ *Marked [#${updated.short_id}] as Done!*\n\n~~${updated.title}~~\nUpdated in Obsidian vault.`, {
-      parse_mode: 'Markdown',
-    });
-  });
-
-  // ---------- notes ----------
-  bot.command('note', async (ctx) => {
-    const raw = (ctx.match as string)?.trim();
-    if (!raw) {
-      await ctx.reply('Send me the note like: `/note Buy milk and eggs #groceries`', {
-        parse_mode: 'Markdown',
-      });
-      return;
-    }
-    const tags = raw.split(/\s+/).filter((w) => /^#/.test(w)).map((w) => w.replace(/^#+/, ''));
-    const content = raw.split(/\s+/).filter((w) => !/^#/.test(w)).join(' ').trim() || raw;
-    const note = await vault.addNote(ctx.chat.id, content, tags);
-    if (!note) {
-      await ctx.reply('⚠️ Couldn\'t save the note.');
-      return;
-    }
-    const tagLine = tags.length ? `\n\n_Tags:_ ${tags.map((t) => `#${t}`).join(' ')}` : '';
-    await ctx.reply(`📝 *Saved note #${note.id}*${tagLine}\n\n${content}`, { parse_mode: 'Markdown' });
-  });
-
-  bot.command('notes', async (ctx) => {
-    const q = (ctx.match as string)?.trim() || undefined;
-    const notes = await vault.listNotes(ctx.chat.id, q);
-    if (notes.length === 0) {
-      await ctx.reply(q ? `Nothing found for “${q}”.` : 'No notes yet. Save one with `/note <text>`!');
-      return;
-    }
-    const lines = notes.map((n, i) => {
-      const tagLine = n.tags.length ? ` _(${n.tags.map((t) => `#${t}`).join(' ')})_` : '';
-      return `${i + 1}. \`#${n.id}\` ${n.content}${tagLine}`;
-    });
-    await ctx.reply(`*${q ? `Notes matching “${q}”` : 'Your notes'}*\n\n${lines.join('\n')}`, {
-      parse_mode: 'Markdown',
-    });
-  });
-
-  bot.command('delnote', async (ctx) => {
-    const id = String((ctx.match as string)?.trim() || '');
-    if (!id) {
-      await ctx.reply('Usage: `/delnote <note id>` — find ids with `/notes`.');
-      return;
-    }
-    const ok = await vault.deleteNote(ctx.chat.id, id);
-    await ctx.reply(ok ? `🗑 Deleted note #${id}.` : `Couldn't delete #${id} — check the id with /notes.`);
-  });
-
-  // ---------- reminders ----------
-  bot.command('remind', async (ctx) => {
-    const raw = (ctx.match as string)?.trim();
-    if (!raw) {
-      await ctx.reply(REMIND_USAGE, { parse_mode: 'Markdown' });
-      return;
-    }
-    const parsed = extractReminderTime(raw);
-    if (!parsed) {
-      await ctx.reply(
-        "I couldn't work out the time. Try e.g. `/remind water plants at 6pm`, `/remind stretch in 30 minutes`, `/remind call mom tomorrow 8am`.",
-        { parse_mode: 'Markdown' }
-      );
-      return;
-    }
-    if (!parsed.rest) {
-      await ctx.reply('What should I remind you about? e.g. `/remind water the plants at 6pm`');
-      return;
-    }
-    if (parsed.due.getTime() <= Date.now()) {
-      await ctx.reply('⏰ That time already passed — try a future time!');
-      return;
-    }
-    const reminder = await vault.addReminder(ctx.chat.id, parsed.rest, parsed.due);
-    if (!reminder) {
-      await ctx.reply('⚠️ Couldn\'t save the reminder.');
-      return;
-    }
-    await ctx.reply(
-      `✅ Got it — I'll remind you to *${parsed.rest}* on ${formatDue(parsed.due)}.\n_(reminder id ${reminder.id})_`,
-      { parse_mode: 'Markdown' }
-    );
-  });
-
-  bot.command('reminders', async (ctx) => {
-    const list = await vault.listUpcomingReminders(ctx.chat.id);
-    if (list.length === 0) {
-      await ctx.reply('No upcoming reminders. Set one with `/remind <task> at <time>`!');
-      return;
-    }
-    const lines = list.map((r) => `• \`#${r.id}\` ${r.text} — _${formatDue(new Date(r.due_at))}_`);
-    await ctx.reply(`📌 *Upcoming reminders*\n\n${lines.join('\n')}`, { parse_mode: 'Markdown' });
-  });
-
-  bot.command('done', async (ctx) => {
-    const id = String((ctx.match as string)?.trim() || '');
-    if (!id) {
-      await ctx.reply('Usage: `/done <reminder id>` — find ids with `/reminders`.');
-      return;
-    }
-    const ok = await vault.markReminderDone(id);
-    await ctx.reply(ok ? `✅ Marked reminder #${id} as done.` : `Couldn't find reminder #${id}.`);
-  });
-
-  // ---------- briefing ----------
-  bot.command('briefing', async (ctx) => {
+  bot.hears(/☀️ Daily Briefing|briefing/i, async (ctx) => {
     await ctx.replyWithChatAction('typing');
     const text = await generateBriefing();
     await ctx.reply(text, { parse_mode: 'Markdown' });
   });
-
-  // ---------- memory ----------
-  bot.command('forget', async (ctx) => {
-    await vault.clearMemory(ctx.chat.id);
-    await ctx.reply('🧹 Done — I\'ve forgotten our conversation. Fresh start!');
+  bot.hears(/📋 My Notes|notes/i, async (ctx) => {
+    await showNotes(ctx);
   });
-
-  // ---------- menu button handlers ----------
-  bot.hears('📥 My Queue', async (ctx) => {
-    await showQueue(ctx);
+  bot.hears(/⏰ My Reminders|reminders/i, async (ctx) => {
+    await showReminders(ctx);
   });
-  bot.hears('🥗 Calorie Tracker', async (ctx) => {
-    await showCalories(ctx);
-  });
-  bot.hears('📝 Save a note', (ctx) =>
-    ctx.reply('Send me the note like: `/note Buy milk and eggs #groceries`')
+  bot.hears(/❓ How to use|help/i, (ctx) =>
+    ctx.reply(NATURAL_GUIDE_TEXT, { parse_mode: 'Markdown' })
   );
-  bot.hears('📋 My notes', async (ctx) => {
-    const notes = await vault.listNotes(ctx.chat.id);
-    await ctx.reply(
-      notes.length === 0
-        ? 'No notes yet. Save one with `/note <text>`!'
-        : `*Your notes*\n\n${notes
-            .map((n, i) => `${i + 1}. \`#${n.id}\` ${n.content}`)
-            .join('\n')}`,
-      { parse_mode: 'Markdown' }
-    );
-  });
-  bot.hears('⏰ Set reminder', (ctx) => ctx.reply(REMIND_USAGE, { parse_mode: 'Markdown' }));
-  bot.hears('☀️ Daily briefing', async (ctx) => {
-    await ctx.replyWithChatAction('typing');
-    const text = await generateBriefing();
-    await ctx.reply(text, { parse_mode: 'Markdown' });
-  });
-  bot.hears('❓ Help', (ctx) => ctx.reply(HELP_TEXT, { parse_mode: 'Markdown' }));
 
-  // ---------- Photo Handler (Food Image Recognition & Calorie Logging) ----------
+  // ---------- Photo Handler (Automatic Multimodal Food & Calorie Recognition) ----------
   bot.on('message:photo', async (ctx) => {
     const photos = ctx.message.photo;
     if (!photos || photos.length === 0) return;
@@ -416,78 +163,66 @@ export function createBot(): Bot {
     } catch (err) {
       console.error('Meal photo processing error:', err);
       await ctx.reply(
-        '⚠️ Failed to analyze meal photo. You can also log it by typing `/eat <description>`, sir.',
+        '⚠️ Failed to analyze meal photo. You can also tell me what you ate in plain text, sir.',
         { parse_mode: 'Markdown' }
       );
     }
   });
 
-  // ---------- Inline Keyboard Callback Queries ----------
+  // ---------- Inline Keyboard Callback Queries (Queue Actions) ----------
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data;
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => {});
 
-    if (data.startsWith('qcat:')) {
-      const parts = data.split(':');
-      const itemId = parts[1];
-      const newCategory = parts[2] as CurationCategory;
-      const updated = await vault.updateQueueItemCategory(itemId, newCategory);
-      if (updated) {
-        await ctx.editMessageText(
-          formatTelegramQueueCard(updated) + `\n\n_Updated category to ${newCategory.toUpperCase()}._`,
-          {
+    try {
+      if (data.startsWith('qcat:')) {
+        const parts = data.split(':');
+        const itemId = parts[1];
+        const newCategory = parts[2] as CurationCategory;
+        const updated = await vault.updateQueueItemCategory(itemId, newCategory);
+        if (updated) {
+          await ctx.editMessageText(
+            formatTelegramQueueCard(updated) + `\n\n_Updated category to ${newCategory.toUpperCase()}._`,
+            {
+              parse_mode: 'Markdown',
+              reply_markup: makeCategoryKeyboard(updated.short_id),
+            }
+          ).catch(() => {});
+        }
+      } else if (data.startsWith('qdone:')) {
+        const itemId = data.split(':')[1];
+        const updated = await vault.updateQueueItemStatus(itemId, 'done');
+        if (updated) {
+          await ctx.editMessageText(
+            `✅ *[#${updated.short_id}] Marked as Done!*\n\n~~${updated.title}~~\n\n_Completed and updated in Obsidian._`,
+            { parse_mode: 'Markdown' }
+          ).catch(() => {});
+        }
+      } else if (data.startsWith('qdel:')) {
+        const itemId = data.split(':')[1];
+        const updated = await vault.updateQueueItemStatus(itemId, 'archived');
+        if (updated) {
+          await ctx.editMessageText(`🗑 *[#${updated.short_id}] Archived and removed from queue.*`, {
             parse_mode: 'Markdown',
-            reply_markup: makeCategoryKeyboard(updated.short_id),
-          }
-        );
+          }).catch(() => {});
+        }
       }
-    } else if (data.startsWith('qdone:')) {
-      const itemId = data.split(':')[1];
-      const updated = await vault.updateQueueItemStatus(itemId, 'done');
-      if (updated) {
-        await ctx.editMessageText(
-          `✅ *[#${updated.short_id}] Marked as Done!*\n\n~~${updated.title}~~\n\n_Completed and updated in Obsidian._`,
-          { parse_mode: 'Markdown' }
-        );
-      }
-    } else if (data.startsWith('qdel:')) {
-      const itemId = data.split(':')[1];
-      const updated = await vault.updateQueueItemStatus(itemId, 'archived');
-      if (updated) {
-        await ctx.editMessageText(`🗑 *[#${updated.short_id}] Archived and removed from queue.*`, {
-          parse_mode: 'Markdown',
-        });
-      }
+    } catch (e) {
+      console.warn('Callback error handled:', e);
     }
   });
 
-  // ---------- Message Handler (Food Text, URL Curation, or Plain Chat) ----------
+  // ---------- Universal Natural Language Message Router ----------
   bot.on('message:text', async (ctx) => {
     const text = ctx.message.text.trim();
     if (!text) return;
 
-    // 1. Check if message is a URL or forwarded article/tweet/post
-    const url = extractUrl(text);
+    // Check if message is a forwarded article/tweet/post
     const isForward = Boolean(
       (ctx.message as any).forward_origin ||
         (ctx.message as any).forward_from ||
         (ctx.message as any).forward_from_chat
     );
-
-    if (url) {
-      await handleCuration(ctx, text, url, isForward ? 'forward' : 'url');
-      return;
-    }
-
-    // 2. Check if message is a natural language meal description
-    const isMealDescription =
-      /^(i\s+(ate|had|drank|consumed)|ate\s+|had\s+|for\s+(breakfast|lunch|dinner|snack)|just\s+ate)/i.test(
-        text
-      );
-    if (isMealDescription) {
-      await handleMealTextLogging(ctx, text);
-      return;
-    }
 
     // In groups, stay quiet unless mentioned or replying to the bot
     if (ctx.chat.type !== 'private') {
@@ -496,58 +231,75 @@ export function createBot(): Bot {
       if (!mentioned && !replyingToBot) return;
     }
 
-    // 3. Normal plain chat with memory
     await ctx.replyWithChatAction('typing');
 
-    const history = await vault.getRecentMessages(ctx.chat.id, 12);
-    const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
-      { role: 'system', content: systemPrompt() },
-      ...history.map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content })),
-      { role: 'user', content: text },
-    ];
+    // Automatically classify intent using AI & heuristics
+    const intentResult: IntentResult = await classifyIntent(text, isForward);
 
-    let reply: string;
-    try {
-      reply = await chatCompletion(messages);
-    } catch (e) {
-      if (e instanceof DeepSeekError && e.message.includes('not set')) {
-        reply =
-          "⚠️ My AI brain isn't switched on yet — the DEEPSEEK_API_KEY hasn't been configured.\n\nMeanwhile I can still help with `/calories`, `/eat`, `/queue`, `/note`, `/remind`, and `/briefing`, sir.";
-      } else {
-        console.error('chat failed:', e);
-        reply = '⚠️ I hit a snag talking to the AI brain. Give me a few seconds and try again, sir!';
+    switch (intentResult.intent) {
+      case 'food_log': {
+        const foodDesc = intentResult.extracted?.food_description || text;
+        await handleMealTextLogging(ctx, foodDesc);
+        break;
+      }
+
+      case 'food_query': {
+        await showCalories(ctx);
+        break;
+      }
+
+      case 'curation': {
+        await handleCuration(ctx, text, undefined, isForward ? 'forward' : 'url');
+        break;
+      }
+
+      case 'reminder': {
+        await handleNaturalReminder(ctx, text, intentResult);
+        break;
+      }
+
+      case 'note': {
+        await handleNaturalNote(ctx, text, intentResult);
+        break;
+      }
+
+      case 'briefing': {
+        const briefingText = await generateBriefing();
+        await ctx.reply(briefingText, { parse_mode: 'Markdown' });
+        break;
+      }
+
+      case 'chat':
+      default: {
+        await handleConversationalChat(ctx, text);
+        break;
       }
     }
-
-    await ctx.reply(reply);
-    void vault.addMessage(ctx.chat.id, 'user', text);
-    void vault.addMessage(ctx.chat.id, 'assistant', reply);
   });
 
   return bot;
 }
 
-/** Helper to display today's calorie summary */
+/** 1. Show Calorie Ledger Status */
 async function showCalories(ctx: any) {
   const daily = await vault.getDailyCalories();
   const text = formatDailyCalorieSummary(daily);
   await ctx.reply(text, { parse_mode: 'Markdown' });
 }
 
-/** Helper to handle meal text logging */
+/** 2. Log Food from Natural Text */
 async function handleMealTextLogging(ctx: any, text: string) {
-  await ctx.replyWithChatAction('typing');
   const analysis = await analyzeMealText(text);
   const result = await vault.addMealLog(ctx.chat.id, analysis, 'text', text);
   if (!result) {
-    await ctx.reply('⚠️ Failed to save meal to calorie ledger, sir.');
+    await ctx.reply('⚠️ Failed to save meal to your calorie ledger, sir.');
     return;
   }
   const card = formatMealLoggedCard(result.meal, result.daily);
   await ctx.reply(card, { parse_mode: 'Markdown' });
 }
 
-/** Helper to display the pending curation queue */
+/** 3. Show Active Antigravity Queue */
 async function showQueue(ctx: any) {
   const items = await vault.listQueueItems('pending', 15);
   if (items.length === 0) {
@@ -573,20 +325,18 @@ async function showQueue(ctx: any) {
   });
 
   await ctx.reply(
-    `📥 *Antigravity Curation Queue (${items.length} pending)*\n\n${lines.join('\n\n')}\n\n_Use \`/qdone <id>\` to mark done, or open Antigravity on desktop to execute!_`,
+    `📥 *Antigravity Curation Queue (${items.length} pending)*\n\n${lines.join('\n\n')}\n\n_Open Antigravity on desktop whenever you are ready to execute, sir!_`,
     { parse_mode: 'Markdown' }
   );
 }
 
-/** Core curation pipeline runner */
+/** 4. Curate Link or Project Idea */
 async function handleCuration(
   ctx: any,
   rawText: string,
   urlOverride?: string,
   sourceType: 'url' | 'text' | 'forward' = 'text'
 ) {
-  await ctx.replyWithChatAction('typing');
-
   const detectedUrl = urlOverride || extractUrl(rawText);
   let urlMeta = null;
 
@@ -613,4 +363,86 @@ async function handleCuration(
     parse_mode: 'Markdown',
     reply_markup: makeCategoryKeyboard(queueItem.short_id),
   });
+}
+
+/** 5. Natural Reminder Handler */
+async function handleNaturalReminder(ctx: any, text: string, intent: IntentResult) {
+  const parsed = extractReminderTime(text);
+  const taskText = parsed?.rest || intent.extracted?.reminder_task || text;
+  const dueDate = parsed?.due || new Date(Date.now() + 60 * 60 * 1000); // default 1 hour if unspecified
+
+  const reminder = await vault.addReminder(ctx.chat.id, taskText, dueDate);
+  if (!reminder) {
+    await ctx.reply('⚠️ Couldn\'t save the reminder, sir.');
+    return;
+  }
+
+  await ctx.reply(
+    `⏰ *Understood, sir.* I have scheduled a reminder for you:\n\n📌 *${taskText}*\n🗓 Due: _${formatDue(dueDate)}_`,
+    { parse_mode: 'Markdown' }
+  );
+}
+
+/** 6. Natural Note Handler */
+async function handleNaturalNote(ctx: any, text: string, intent: IntentResult) {
+  const noteContent = intent.extracted?.note_text || text;
+  const tags = intent.extracted?.note_tags || [];
+  const note = await vault.addNote(ctx.chat.id, noteContent, tags);
+  if (!note) {
+    await ctx.reply('⚠️ Couldn\'t save the note, sir.');
+    return;
+  }
+  const tagLine = tags.length ? `\n\n_Tags:_ ${tags.map((t) => `#${t}`).join(' ')}` : '';
+  await ctx.reply(`📝 *Saved to your notes, sir.*\n\n${noteContent}${tagLine}`, {
+    parse_mode: 'Markdown',
+  });
+}
+
+/** 7. Show Notes List */
+async function showNotes(ctx: any) {
+  const notes = await vault.listNotes(ctx.chat.id);
+  if (notes.length === 0) {
+    await ctx.reply('No notes saved yet, sir. You can tell me anything you would like to remember.');
+    return;
+  }
+  const lines = notes.map((n, i) => `${i + 1}. \`#${n.id}\` ${n.content}`);
+  await ctx.reply(`📋 *Your Notes:*\n\n${lines.join('\n')}`, { parse_mode: 'Markdown' });
+}
+
+/** 8. Show Upcoming Reminders */
+async function showReminders(ctx: any) {
+  const list = await vault.listUpcomingReminders(ctx.chat.id);
+  if (list.length === 0) {
+    await ctx.reply('No upcoming reminders, sir.');
+    return;
+  }
+  const lines = list.map((r) => `• \`#${r.id}\` ${r.text} — _${formatDue(new Date(r.due_at))}_`);
+  await ctx.reply(`⏰ *Upcoming Reminders:*\n\n${lines.join('\n')}`, { parse_mode: 'Markdown' });
+}
+
+/** 9. Conversational Butler Chat */
+async function handleConversationalChat(ctx: any, text: string) {
+  const history = await vault.getRecentMessages(ctx.chat.id, 12);
+  const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+    { role: 'system', content: systemPrompt() },
+    ...history.map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content })),
+    { role: 'user', content: text },
+  ];
+
+  let reply: string;
+  try {
+    reply = await chatCompletion(messages);
+  } catch (e) {
+    if (e instanceof DeepSeekError && e.message.includes('not set')) {
+      reply =
+        "⚠️ My AI brain isn't switched on yet — the DEEPSEEK_API_KEY hasn't been configured.\n\nMeanwhile I can still help you with food tracking, curation, and notes, sir.";
+    } else {
+      console.error('chat failed:', e);
+      reply = '⚠️ I hit a snag connecting to the AI brain. Give me a moment and try again, sir!';
+    }
+  }
+
+  await ctx.reply(reply);
+  void vault.addMessage(ctx.chat.id, 'user', text);
+  void vault.addMessage(ctx.chat.id, 'assistant', reply);
 }
