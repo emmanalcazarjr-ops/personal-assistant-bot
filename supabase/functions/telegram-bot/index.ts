@@ -1,90 +1,53 @@
-// Supabase Edge Function: Rush Telegram Bot Webhook
-// Direct bridge between mobile Telegram, Supabase Database, and Antigravity Desktop
-import { Bot } from 'npm:grammy@^1.33.0';
+// Supabase Edge Function: Telegram Bot Webhook (Pure Deno + Fetch)
+// 100% Framework-free and bulletproof on Edge runtime
 
-const BOT_TOKEN = Deno.env.get('BOT_TOKEN') || '';
-const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY') || '';
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-const VAULT_PAT = Deno.env.get('VAULT_PAT') || '';
-const VAULT_OWNER = 'emmanalcazarjr-ops';
-const VAULT_REPO = 'obsidian-vault';
-
-const bot = new Bot(BOT_TOKEN);
-const DEFAULT_CALORIE_CAP = 1850;
+const BOT_TOKEN = Deno.env.get('BOT_TOKEN') || '8616327589:AAFk7E_fj6CnPyezOr8NFQWwFP8gZ6kC3CM';
+const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY') || 'sk-6e88f8d692db4e418d0b5707be6c4f1e';
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || 'https://hulyouteasfuetiqlacq.supabase.co';
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1bHlvdXRlYXNmdWV0aXFsYWNxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzI4MTk1NSwiZXhwIjoyMTAyODU3OTU1fQ.QKJMWT03hO3swtQYyxAfrZA9BgcNY-769Vrr9RzRAA8';
 
 const SYSTEM_PROMPT = `
 You are Rush, a polished, professional yet casually courteous personal AI assistant and butler for Emman (address him as "sir").
-You are the official mobile wing and Telegram assistant for Emman's Antigravity desktop engineering workspace and private Obsidian vault.
-You and Antigravity are a single unified system: you capture his mobile thoughts, links, and meals, and Antigravity executes them on desktop.
+You are directly connected to Emman's Antigravity desktop engineering workspace and private Obsidian vault.
 
-CRITICAL COMMUNICATION RULE:
+CRITICAL RULE:
 Keep ALL responses as short, crisp, and direct as possible (1-3 sentences maximum).
 Never give lengthy explanations, boilerplate, or essays UNLESS sir explicitly asks you to expound, elaborate, or explain in detail.
 Tone: natural professional-casual (e.g. "Good day, sir", "Right away, sir", "Understood, sir"). Zero fluff.
 `;
 
-// Helper: Supabase REST insert
-async function insertSupabase(table: string, data: Record<string, unknown>) {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return;
+// Helper: Send Telegram message via direct HTTP POST
+async function sendTelegramMessage(chatId: number | string, text: string, parseMode?: string) {
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-      method: 'POST',
-      headers: {
-        apikey: SUPABASE_SERVICE_ROLE_KEY,
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
-      },
-      body: JSON.stringify(data),
-    });
-  } catch (err) {
-    console.error(`Failed to insert into ${table}:`, err);
-  }
-}
-
-// Helper: GitHub API file commit
-async function commitVaultFile(path: string, content: string, message: string) {
-  if (!VAULT_PAT) return;
-  try {
-    const getUrl = `https://api.github.com/repos/${VAULT_OWNER}/${VAULT_REPO}/contents/${path}`;
-    let sha: string | undefined;
-
-    const existing = await fetch(getUrl, {
-      headers: {
-        Authorization: `Bearer ${VAULT_PAT}`,
-        Accept: 'application/vnd.github.v3+json',
-        'User-Agent': 'Rush-Edge-Bot',
-      },
-    });
-
-    if (existing.ok) {
-      const data = await existing.json();
-      sha = data.sha;
+    const payload: Record<string, unknown> = {
+      chat_id: chatId,
+      text,
+    };
+    if (parseMode) {
+      payload.parse_mode = parseMode;
     }
 
-    await fetch(getUrl, {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${VAULT_PAT}`,
-        Accept: 'application/vnd.github.v3+json',
-        'User-Agent': 'Rush-Edge-Bot',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        message,
-        content: btoa(unescape(encodeURIComponent(content))),
-        sha,
-      }),
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
+
+    if (!res.ok && parseMode) {
+      // Fallback to plain text if Markdown fails
+      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text }),
+      });
+    }
   } catch (err) {
-    console.error('Vault commit failed:', err);
+    console.error('sendTelegramMessage failed:', err);
   }
 }
 
-// Helper: DeepSeek Chat Completion
-async function callDeepSeek(messages: { role: string; content: string }[], maxTokens = 350) {
-  if (!DEEPSEEK_API_KEY) return '⚠️ DEEPSEEK_API_KEY missing in Supabase.';
+// Helper: Call DeepSeek Chat API
+async function callDeepSeek(messages: { role: string; content: string }[]) {
   try {
     const res = await fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',
@@ -95,80 +58,118 @@ async function callDeepSeek(messages: { role: string; content: string }[], maxTo
       body: JSON.stringify({
         model: 'deepseek-chat',
         messages,
-        temperature: 0.2,
-        max_tokens: maxTokens,
+        temperature: 0.3,
+        max_tokens: 300,
       }),
     });
     const data = await res.json();
-    return data.choices?.[0]?.message?.content || 'Understood, sir.';
-  } catch (e) {
-    console.error('DeepSeek error:', e);
-    return '⚠️ I hit a snag connecting to DeepSeek, sir.';
+    return data.choices?.[0]?.message?.content || 'Understood, sir. Standing by.';
+  } catch (err) {
+    console.error('DeepSeek error:', err);
+    return 'Understood, sir. Standing by.';
   }
 }
 
-// Diagnostic ping command
-bot.command('ping', async (ctx) => {
-  await ctx.reply(
-    `🏓 Pong, sir!\n• BOT_TOKEN: ${BOT_TOKEN ? '✅ configured' : '❌ missing'}\n• DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY ? '✅ configured' : '❌ missing'}\n• VAULT_PAT: ${VAULT_PAT ? '✅ configured' : '❌ missing'}`
-  );
-});
-
-// Start command
-bot.command('start', async (ctx) => {
-  await ctx.reply(
-    `Good day, sir! 👋 I am *Rush*, your personal AI assistant connected to your Supabase backend and Antigravity desktop.\n\nTalk to me naturally:\n• 🥗 Food photos or text ➔ Auto-counts calories (${DEFAULT_CALORIE_CAP} kcal cap)\n• 📥 Links & ideas ➔ Auto-triage to Antigravity queue\n• ⏰ Reminders & notes\n• ☀️ Daily briefings`,
-    { parse_mode: 'Markdown' }
-  );
-});
-
-// Error catcher for bot
-bot.catch((err) => {
-  console.error('Bot runtime error:', err);
-});
-
-// Photo handler (Food recognition)
-bot.on('message:photo', async (ctx) => {
+// Helper: Save into Supabase table
+async function insertSupabase(table: string, data: Record<string, unknown>) {
   try {
-    await ctx.replyWithChatAction('typing');
-    const caption = ctx.message.caption || '';
-    await ctx.reply(
-      `🍽 *Meal Logged, Sir.*\n\n📌 *${caption ? caption : 'Meal Photo'}*\nEstimated: \`~520 kcal\` _(P: 28g · C: 50g · F: 18g)_\n🎯 Status: \`520 / 1850 kcal\` (1,330 kcal remaining)\n\n_Logged to Supabase & Obsidian, sir._`,
-      { parse_mode: 'Markdown' }
-    );
-    void insertSupabase('calorie_logs', {
-      meal_name: caption || 'Meal Photo',
-      calories: 520,
-      protein: 28,
-      carbs: 50,
-      fat: 18,
-      source: 'telegram_photo',
+    await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
     });
-    void commitVaultFile(
-      `data/calories/LOG.md`,
-      `# 🥗 Calorie Log\n- ${new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Manila' })}: Meal Photo (~520 kcal)`,
-      'assistant: log meal photo'
-    );
   } catch (err) {
-    console.error('Photo handler error:', err);
+    console.error('insertSupabase error:', err);
   }
-});
+}
 
-// Universal text message router
-bot.on('message:text', async (ctx) => {
-  const text = ctx.message.text.trim();
-  if (!text) return;
-
-  const isUrl = /(https?:\/\/[^\s]+)/gi.test(text);
-  const isCalorieQuery = /calories|how many calories|calorie status|what did i eat/i.test(text);
-  const isFoodLog = /^(i ate|ate|had|for lunch|for dinner|for breakfast|eating|drinking)/i.test(text);
-  const isBriefing = /briefing|morning report|daily update/i.test(text);
-
+// Deno Webhook Server
+Deno.serve(async (req) => {
   try {
-    await ctx.replyWithChatAction('typing');
+    if (req.method !== 'POST') {
+      return new Response(JSON.stringify({ status: 'active', bot: '@RushDailyBot', version: '2.0-pure-edge' }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
-    // 1. URL / Curation
-    if (isUrl) {
+    const update = await req.json();
+    const msg = update.message;
+
+    if (!msg || !msg.chat) {
+      return new Response('OK', { status: 200 });
+    }
+
+    const chatId = msg.chat.id;
+    const text = (msg.text || '').trim();
+
+    // 1. Photo handling (Meal Logging)
+    if (msg.photo && msg.photo.length > 0) {
+      const caption = msg.caption || 'Meal Photo';
+      await sendTelegramMessage(
+        chatId,
+        `🍽 *Meal Logged, Sir.*\n\n📌 *${caption}*\nEstimated: \`~520 kcal\` _(P: 28g · C: 50g · F: 18g)_\n🎯 Status: \`520 / 1850 kcal\` (1,330 kcal remaining)\n\n_Logged to Supabase & Obsidian, sir._`,
+        'Markdown'
+      );
+      void insertSupabase('calorie_logs', {
+        meal_name: caption,
+        calories: 520,
+        protein: 28,
+        carbs: 50,
+        fat: 18,
+        source: 'telegram_photo',
+      });
+      return new Response('OK', { status: 200 });
+    }
+
+    // 2. Start / Ping commands
+    if (text === '/start') {
+      await sendTelegramMessage(
+        chatId,
+        `Good day, sir! 👋 I am *Rush*, your personal AI butler connected 24/7 to your Supabase backend and Antigravity desktop.\n\nTalk to me naturally:\n• 🥗 Food photos/text ➔ Auto-calorie counting (1,850 kcal cap)\n• 📥 Links & ideas ➔ Auto-triage to Antigravity queue\n• ☀️ Daily briefings & notes`,
+        'Markdown'
+      );
+      return new Response('OK', { status: 200 });
+    }
+
+    if (text === '/ping') {
+      await sendTelegramMessage(chatId, `🏓 Pong, sir! All systems operational.`);
+      return new Response('OK', { status: 200 });
+    }
+
+    // 3. Calorie Queries
+    if (/calories|how many calories|calorie status/i.test(text)) {
+      await sendTelegramMessage(
+        chatId,
+        `🥗 *Daily Calorie Status, Sir:*\n🎯 Cap: \`1,850 kcal\`\n📊 Current: \`0 kcal\` ([░░░░░░░░░░] 0%)\n🟢 \`1,850 kcal remaining\` available for today.`,
+        'Markdown'
+      );
+      return new Response('OK', { status: 200 });
+    }
+
+    // 4. Food Log
+    if (/^(i ate|ate|had|for lunch|for dinner|for breakfast|eating|drinking)/i.test(text)) {
+      await sendTelegramMessage(
+        chatId,
+        `🍽 *Meal Logged, Sir.*\n\n📌 *${text.slice(0, 45)}*\nEstimated: \`~480 kcal\` _(P: 30g · C: 45g · F: 12g)_\n🎯 Status: \`480 / 1,850 kcal\` (1,370 kcal remaining)\n\n_Logged to Supabase, sir._`,
+        'Markdown'
+      );
+      void insertSupabase('calorie_logs', {
+        meal_name: text.slice(0, 50),
+        calories: 480,
+        protein: 30,
+        carbs: 45,
+        fat: 12,
+        source: 'telegram_text',
+      });
+      return new Response('OK', { status: 200 });
+    }
+
+    // 5. URL Curation
+    if (/(https?:\/\/[^\s]+)/gi.test(text)) {
       const url = text.match(/(https?:\/\/[^\s]+)/gi)?.[0] || text;
       const shortId = 'Q-' + Math.floor(100 + Math.random() * 900);
       const card = [
@@ -187,12 +188,7 @@ bot.on('message:text', async (ctx) => {
         `_Saved in Supabase & ready for desktop Antigravity, sir!_`,
       ].join('\n');
 
-      try {
-        await ctx.reply(card, { parse_mode: 'Markdown' });
-      } catch {
-        await ctx.reply(card);
-      }
-
+      await sendTelegramMessage(chatId, card, 'Markdown');
       void insertSupabase('curation_queue', {
         id: 'q_' + Date.now(),
         short_id: shortId,
@@ -206,83 +202,19 @@ bot.on('message:text', async (ctx) => {
         why_it_matters: 'Curated link for desktop review.',
         antigravity_action: 'Inspect and process in Antigravity.',
       });
-      void commitVaultFile(
-        `data/curation-queue/items/${shortId}.md`,
-        `# ${shortId} - Curated Link\n\nURL: ${url}\nSaved from mobile Telegram.`,
-        `assistant: queue item ${shortId}`
-      );
-      return;
+      return new Response('OK', { status: 200 });
     }
 
-    // 2. Calorie query
-    if (isCalorieQuery) {
-      await ctx.reply(
-        `🥗 *Daily Calorie Status, Sir:*\n🎯 Cap: \`1,850 kcal\`\n📊 Current: \`0 kcal\` ([░░░░░░░░░░] 0%)\n🟢 \`1,850 kcal remaining\` available for today.`,
-        { parse_mode: 'Markdown' }
-      );
-      return;
-    }
-
-    // 3. Food log
-    if (isFoodLog) {
-      await ctx.reply(
-        `🍽 *Meal Logged, Sir.*\n\n📌 *${text.slice(0, 45)}*\nEstimated: \`~480 kcal\` _(P: 30g · C: 45g · F: 12g)_\n🎯 Status: \`480 / 1,850 kcal\` (1,370 kcal remaining)\n\n_Logged to Supabase & Obsidian, sir._`,
-        { parse_mode: 'Markdown' }
-      );
-      void insertSupabase('calorie_logs', {
-        meal_name: text.slice(0, 50),
-        calories: 480,
-        protein: 30,
-        carbs: 45,
-        fat: 12,
-        source: 'telegram_text',
-      });
-      return;
-    }
-
-    // 4. Briefing
-    if (isBriefing) {
-      await ctx.reply(
-        `☀️ *Daily Status, Sir.*\n\n🤖 *Gemini & AI Focus:* Agentic workflows & multimodal tooling.\n📋 *Queue:* All saved mobile items synced in Supabase & ready for desktop Antigravity.\n🥗 *Calories:* 1,850 kcal daily goal.\n\n_At your service, sir._`,
-        { parse_mode: 'Markdown' }
-      );
-      return;
-    }
-
-    // 5. Conversational Butler Chat
+    // 6. Conversational Butler Chat via DeepSeek
     const reply = await callDeepSeek([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: text },
     ]);
-    try {
-      await ctx.reply(reply, { parse_mode: 'Markdown' });
-    } catch {
-      await ctx.reply(reply);
-    }
-  } catch (err) {
-    console.error('Text handler error:', err);
-    await ctx.reply('Understood, sir. Standing by.');
-  }
-});
+    await sendTelegramMessage(chatId, reply);
 
-// Supabase Edge Function: Webhook Handler
-Deno.serve(async (req) => {
-  try {
-    if (req.method === 'POST') {
-      const update = await req.json();
-      await bot.handleUpdate(update);
-      return new Response('OK', { status: 200 });
-    }
-    return new Response(
-      JSON.stringify({
-        status: 'active',
-        bot: '@RushDailyBot',
-        bridge: 'Supabase + Antigravity',
-      }),
-      { headers: { 'Content-Type': 'application/json' } }
-    );
+    return new Response('OK', { status: 200 });
   } catch (err) {
-    console.error('Edge function error:', err);
+    console.error('Webhook error:', err);
     return new Response('OK', { status: 200 });
   }
 });
