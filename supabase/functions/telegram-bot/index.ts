@@ -107,6 +107,13 @@ async function callDeepSeek(messages: { role: string; content: string }[], maxTo
   }
 }
 
+// Diagnostic ping command
+bot.command('ping', async (ctx) => {
+  await ctx.reply(
+    `🏓 Pong, sir!\n• BOT_TOKEN: ${BOT_TOKEN ? '✅ configured' : '❌ missing'}\n• DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY ? '✅ configured' : '❌ missing'}\n• VAULT_PAT: ${VAULT_PAT ? '✅ configured' : '❌ missing'}`
+  );
+});
+
 // Start command
 bot.command('start', async (ctx) => {
   await ctx.reply(
