@@ -155,9 +155,9 @@ function getBriefingEdition(): 'morning' | 'evening' {
 async function fetchGospelReflection(dateStr: string): Promise<{ verse: string; reflection: string; prayer: string }> {
   if (hasDeepSeek()) {
     try {
-      const prompt = `You are a Catholic spiritual director. Provide a short Gospel verse for today (${dateStr}), a concise 1-sentence practical reflection for Emman (software/AI engineer), and a brief 1-sentence morning prayer.
+      const prompt = `You are a Catholic spiritual director. Provide a short Catholic Gospel verse for today (${dateStr}), a concise 1-sentence traditional spiritual reflection on faith, gratitude, love, and living with virtue, and a brief 1-sentence morning prayer.
 Format as strict JSON:
-{"verse": "Book Chapter:Verse - 'Brief verse'", "reflection": "1 sentence practical reflection.", "prayer": "1 sentence morning prayer."}`;
+{"verse": "Book Chapter:Verse - 'Brief verse quote'", "reflection": "1 concise sentence spiritual reflection.", "prayer": "1 concise sentence morning prayer."}`;
       const res = await summarize(prompt, 250);
       const clean = res.replace(/```json/g, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(clean);
@@ -168,8 +168,8 @@ Format as strict JSON:
   }
   return {
     verse: 'Matthew 5:16 — "Let your light shine before others, that they may see your good deeds and glorify your Father in heaven."',
-    reflection: 'Approach your work and code today with purposeful craft, patience, and excellence.',
-    prayer: 'Lord, grant me wisdom, sharp focus, and peace in all that I build and learn today. Amen.',
+    reflection: 'Live today with kindness, integrity, and faith, trusting in God’s grace through every moment.',
+    prayer: 'Lord, grant me peace in my heart, wisdom in my actions, and the grace to walk in Your light today. Amen.',
   };
 }
 
