@@ -151,18 +151,56 @@ function getBriefingEdition(): 'morning' | 'evening' {
   return currentHour >= 14 ? 'evening' : 'morning';
 }
 
+/** Short Gospel Reflection and Daily Prayer */
+async function fetchGospelReflection(dateStr: string): Promise<{ verse: string; reflection: string; prayer: string }> {
+  if (hasDeepSeek()) {
+    try {
+      const prompt = `You are a Catholic spiritual director. Provide a short Gospel verse for today (${dateStr}), a concise 1-sentence practical reflection for Emman (software/AI engineer), and a brief 1-sentence morning prayer.
+Format as strict JSON:
+{"verse": "Book Chapter:Verse - 'Brief verse'", "reflection": "1 sentence practical reflection.", "prayer": "1 sentence morning prayer."}`;
+      const res = await summarize(prompt, 250);
+      const clean = res.replace(/```json/g, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(clean);
+      if (parsed.verse && parsed.reflection && parsed.prayer) return parsed;
+    } catch {
+      // fallback below
+    }
+  }
+  return {
+    verse: 'Matthew 5:16 — "Let your light shine before others, that they may see your good deeds and glorify your Father in heaven."',
+    reflection: 'Approach your work and code today with purposeful craft, patience, and excellence.',
+    prayer: 'Lord, grant me wisdom, sharp focus, and peace in all that I build and learn today. Amen.',
+  };
+}
+
+/** Short Scorpio Daily Horoscope */
+async function fetchScorpioHoroscope(dateStr: string): Promise<string> {
+  if (hasDeepSeek()) {
+    try {
+      const prompt = `Generate a short, inspiring Scorpio daily horoscope for today (${dateStr}) in the style of the Daily Horoscope app. 1-2 sentences maximum focusing on determination, intuition, and strategic execution. Return ONLY the plain text sentences.`;
+      const text = await summarize(prompt, 120);
+      if (text.trim()) return text.trim();
+    } catch {
+      // fallback below
+    }
+  }
+  return 'Your sharp intuition and strategic focus are at their peak today. Channel your energy into high-impact execution and trust your instincts.';
+}
+
 /** Full briefing text composer with Gemini AI news & To-Dos */
 export async function generateBriefing(explicitEdition?: 'morning' | 'evening'): Promise<string> {
   const edition = explicitEdition || getBriefingEdition();
   const isMorning = edition === 'morning';
 
-  const [weather, news, views, queueItems, reminders, dailyCalories] = await Promise.all([
+  const [weather, news, views, queueItems, reminders, dailyCalories, gospel, scorpio] = await Promise.all([
     fetchWeather(),
     fetchAiNews(),
     fetchPortfolioViews(),
     vault.listQueueItems('pending', 6),
     vault.listUpcomingReminders(Number(config.ownerChatId) || 0, 5),
     vault.getDailyCalories(),
+    isMorning ? fetchGospelReflection(dateLabel()) : Promise.resolve(null),
+    isMorning ? fetchScorpioHoroscope(dateLabel()) : Promise.resolve(null),
   ]);
 
   const newsList =
@@ -196,15 +234,36 @@ export async function generateBriefing(explicitEdition?: 'morning' | 'evening'):
     calRemaining,
   };
 
-  if (hasDeepSeek()) {
   // Primary Clean Structured Briefing Format
   const greeting = isMorning
     ? `☀️ *Good morning, sir.* These are the news and your possible to-dos to improve yourself today.`
     : `🌙 *Good evening, sir.* Here is your evening AI wrap-up and status report.`;
 
-  return [
+  const sections: string[] = [
     greeting,
     `📅 _${facts.date}_ · 📍 _${facts.city}_ (${facts.weather})`,
+  ];
+
+  // Morning Spiritual & Mindset additions
+  if (isMorning && gospel) {
+    sections.push(
+      '',
+      `✝️ *Daily Gospel & Reflection:*`,
+      `• *${gospel.verse}*`,
+      `  _${gospel.reflection}_`,
+      `  🙏 *Prayer:* _${gospel.prayer}_`
+    );
+  }
+
+  if (isMorning && scorpio) {
+    sections.push(
+      '',
+      `♏ *Scorpio Horoscope:*`,
+      `• _${scorpio}_`
+    );
+  }
+
+  sections.push(
     '',
     `🤖 *AI & Gemini Developments (Work & Portfolio Impact):*`,
     news.length > 0
@@ -219,6 +278,8 @@ export async function generateBriefing(explicitEdition?: 'morning' | 'evening'):
     '',
     isMorning
       ? `🚀 _I am at your service whenever you are ready to build on desktop, sir._\n— Rush`
-      : `✨ _Have a restful evening, sir. We will continue advancing tomorrow._\n— Rush`,
-  ].join('\n');
+      : `✨ _Have a restful evening, sir. We will continue advancing tomorrow._\n— Rush`
+  );
+
+  return sections.join('\n');
 }
