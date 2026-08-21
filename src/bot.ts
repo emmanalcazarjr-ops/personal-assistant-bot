@@ -25,7 +25,7 @@ import {
   DEFAULT_CALORIE_CAP,
 } from './calories.ts';
 
-const BOT_USERNAME = process.env.BOT_USERNAME || 'rushrush0406bot';
+const BOT_USERNAME = process.env.BOT_USERNAME || 'rushdailybot';
 
 const HELP_TEXT = [
   '*Rush — your personal assistant & Antigravity bridge*',
