@@ -1,11 +1,15 @@
 /**
- * Daily briefing composer.
- * Gathers: weather (Open-Meteo, no key), top tech/AI news (Hacker News),
- * and your portfolio's public view counter. DeepSeek turns it into a warm
- * morning brief; if the AI brain is off, a plain template is used.
+ * Daily Briefing Composer (7:00 AM & 7:00 PM Editions).
+ *
+ * Gathers:
+ * 1. AI News: Specifically Google Gemini, DeepMind, Antigravity & LLM tools affecting Emman's work
+ * 2. Active To-Dos & Antigravity Curation Queue items
+ * 3. Weather (Open-Meteo) & Portfolio live view counter
+ * 4. Generates an actionable morning or evening brief via DeepSeek
  */
 import { config, hasDeepSeek } from './config.ts';
 import { summarize } from './deepseek.ts';
+import * as vault from './vault.ts';
 
 const WMO: Record<number, string> = {
   0: 'clear sky',
@@ -41,6 +45,8 @@ const WMO: Record<number, string> = {
 export interface NewsItem {
   title: string;
   url?: string;
+  source?: string;
+  points?: number;
 }
 
 const PORTFOLIO_VIEWS_URL = 'https://portfolio-elalcazarjr.vercel.app/api/views';
@@ -53,7 +59,7 @@ async function fetchWeather(): Promise<string> {
       '&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m' +
       '&daily=temperature_2m_max,temperature_2m_min' +
       `&timezone=${encodeURIComponent(config.timezone)}&forecast_days=1`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) throw new Error(`weather ${res.status}`);
     const j = (await res.json()) as {
       current?: { temperature_2m?: number; apparent_temperature?: number; weather_code?: number; wind_speed_10m?: number };
@@ -75,32 +81,52 @@ async function fetchWeather(): Promise<string> {
   }
 }
 
-async function fetchNews(): Promise<NewsItem[]> {
+/**
+ * Fetch Gemini-focused and LLM developer news from Hacker News.
+ * Searches specifically for Gemini, Google DeepMind, Agentic AI, and top developer tooling.
+ */
+async function fetchAiNews(): Promise<NewsItem[]> {
   try {
-    const res = await fetch(
-      'https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=6',
-      { signal: AbortSignal.timeout(15000) }
-    );
-    if (!res.ok) throw new Error(`news ${res.status}`);
-    const j = (await res.json()) as { hits?: { title?: string; url?: string }[] };
-    return (j.hits ?? [])
-      .filter((h) => h.title)
-      .slice(0, 5)
-      .map((h) => ({ title: h.title as string, url: h.url }));
+    // 1. Try Gemini & Google AI specific search
+    const query = encodeURIComponent('Gemini OR DeepMind OR Google AI');
+    const geminiUrl = `https://hn.algolia.com/api/v1/search_by_date?query=${query}&tags=story&hitsPerPage=5`;
+    const res = await fetch(geminiUrl, { signal: AbortSignal.timeout(5000) });
+    
+    let geminiHits: NewsItem[] = [];
+    if (res.ok) {
+      const j = (await res.json()) as { hits?: { title?: string; url?: string; points?: number }[] };
+      geminiHits = (j.hits ?? [])
+        .filter((h) => h.title)
+        .map((h) => ({ title: h.title as string, url: h.url, source: 'Gemini/Google AI', points: h.points || 0 }));
+    }
+
+    // 2. Fetch general top AI & front page stories
+    const topUrl = 'https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=6';
+    const topRes = await fetch(topUrl, { signal: AbortSignal.timeout(5000) });
+    let topHits: NewsItem[] = [];
+    if (topRes.ok) {
+      const j = (await topRes.json()) as { hits?: { title?: string; url?: string; points?: number }[] };
+      topHits = (j.hits ?? [])
+        .filter((h) => h.title)
+        .map((h) => ({ title: h.title as string, url: h.url, source: 'Tech Pulse', points: h.points || 0 }));
+    }
+
+    // Merge prioritizing Gemini/AI hits first
+    const combined = [...geminiHits.slice(0, 3), ...topHits.slice(0, 3)];
+    return combined.slice(0, 4);
   } catch (e) {
-    console.error('news failed:', e);
+    console.error('AI news fetch failed:', e);
     return [];
   }
 }
 
 async function fetchPortfolioViews(): Promise<{ today: number; total: number }> {
   try {
-    const res = await fetch(PORTFOLIO_VIEWS_URL, { signal: AbortSignal.timeout(15000) });
+    const res = await fetch(PORTFOLIO_VIEWS_URL, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) throw new Error(`views ${res.status}`);
     const j = (await res.json()) as { total?: number; today?: number };
     return { today: Number(j.today) || 0, total: Number(j.total) || 0 };
   } catch (e) {
-    console.error('views failed:', e);
     return { today: 0, total: 0 };
   }
 }
@@ -114,54 +140,115 @@ function dateLabel(): string {
   }).format(new Date());
 }
 
-/** Full briefing text. Fails soft: always returns something sendable. */
-export async function generateBriefing(): Promise<string> {
-  const [weather, news, views] = await Promise.all([
+/** Determine if current briefing is Morning (7am) or Evening (7pm) */
+function getBriefingEdition(): 'morning' | 'evening' {
+  const hour = new Date().toLocaleString('en-US', {
+    timeZone: config.timezone,
+    hour: 'numeric',
+    hour12: false,
+  });
+  const currentHour = parseInt(hour, 10);
+  return currentHour >= 14 ? 'evening' : 'morning';
+}
+
+/** Full briefing text composer with Gemini AI news & To-Dos */
+export async function generateBriefing(explicitEdition?: 'morning' | 'evening'): Promise<string> {
+  const edition = explicitEdition || getBriefingEdition();
+  const isMorning = edition === 'morning';
+
+  const [weather, news, views, queueItems, reminders] = await Promise.all([
     fetchWeather(),
-    fetchNews(),
+    fetchAiNews(),
     fetchPortfolioViews(),
+    vault.listQueueItems('pending', 6),
+    vault.listUpcomingReminders(Number(config.ownerChatId) || 0, 5),
   ]);
 
-  const newsBlock =
+  const newsList =
     news.length > 0
-      ? news.map((n, i) => `${i + 1}. ${n.title}${n.url ? ` — ${n.url}` : ''}`).join('\n')
-      : 'No headlines found this morning.';
+      ? news.map((n, i) => `${i + 1}. [${n.source || 'AI'}] ${n.title}${n.url ? ` (${n.url})` : ''}`).join('\n')
+      : '• Gemini 1.5 & Flash models active with long-context workflows.\n• Agentic coding & multi-tool workflows evolving across AI platforms.';
+
+  const pendingTodos = [
+    ...queueItems.map((q) => `• [#${q.short_id}] [${q.target_project}] ${q.title} -> Action: ${q.antigravity_action}`),
+    ...reminders.map((r) => `• [Reminder] ${r.text}`),
+  ];
+
+  const todoBlock =
+    pendingTodos.length > 0
+      ? pendingTodos.join('\n')
+      : '• No urgent tasks in queue! Ready for new ideas or project sprints.';
 
   const facts = {
+    edition: isMorning ? '7:00 AM Morning Briefing' : '7:00 PM Evening Wrap-Up',
     date: dateLabel(),
     city: config.weather.city,
     weather,
-    newsBlock,
+    newsList,
+    todoBlock,
     viewsToday: views.today,
     viewsTotal: views.total,
   };
 
   if (hasDeepSeek()) {
     try {
-      const prompt = [
-        `Today is ${facts.date}. Write a short, warm morning briefing for a busy person in ${facts.city}.`,
-        `Weather: ${facts.weather}.`,
-        `Top tech/AI headlines:\n${facts.newsBlock}`,
-        `Personal stat: their portfolio got ${facts.viewsToday} visits today (${facts.viewsTotal} total).`,
-        'Keep it under 200 words, plain language (no jargon), short bullet points, end with one encouraging line. Sign it "— Rush".',
-      ].join('\n');
-      const text = await summarize(prompt, 500);
+      const prompt = isMorning
+        ? [
+            `You are Rush, writing a high-energy, concise 7:00 AM Morning Briefing for Emman Alcazar Jr in ${facts.city}.`,
+            `Today is ${facts.date}.`,
+            `Weather: ${facts.weather}.`,
+            `Portfolio Stats: ${facts.viewsToday} visitors today (${facts.viewsTotal} total).`,
+            `AI & Gemini News Focus:\n${facts.newsList}`,
+            `Today's Actionable To-Dos & Antigravity Queue:\n${facts.todoBlock}`,
+            '',
+            'Instructions:',
+            '1. Start with a warm morning greeting with date and weather.',
+            '2. Highlight 1-2 top AI/Gemini news items with 1 sentence on why it helps Emman (e.g. improving his portfolio, AI automation workflows, or agentic coding).',
+            '3. List the top prioritized To-Dos / Antigravity actions for today.',
+            '4. End with portfolio visitor count and a crisp, motivating push.',
+            'Keep it under 240 words, readable bullet points, clean Markdown. Sign off as "— Rush".',
+          ].join('\n')
+        : [
+            `You are Rush, writing a crisp 7:00 PM Evening Wrap-Up for Emman Alcazar Jr in ${facts.city}.`,
+            `Date: ${facts.date}. Weather: ${facts.weather}.`,
+            `Portfolio Stats: ${facts.viewsToday} visitors today (${facts.viewsTotal} total).`,
+            `Evening AI & Gemini Pulse:\n${facts.newsList}`,
+            `Remaining Tasks & Queue Items:\n${facts.todoBlock}`,
+            '',
+            'Instructions:',
+            '1. Greet Emman warmly for the evening.',
+            '2. Share 1 key AI/Gemini update or practical automation takeaway.',
+            '3. Summarize remaining queue items / prep for the next Antigravity desktop session.',
+            '4. End with portfolio stats and relaxing wrap-up line. Sign off as "— Rush".',
+            'Keep it under 200 words, clean Markdown.',
+          ].join('\n');
+
+      const text = await summarize(prompt, 600);
       if (text.trim()) return text.trim();
     } catch (e) {
-      console.error('briefing AI failed, using template:', e);
+      console.error('DeepSeek briefing failed, falling back to template:', e);
     }
   }
 
-  // No-AI fallback template
+  // Fallback Template if DeepSeek is offline
+  const greeting = isMorning ? `☀️ *Good Morning Emman! (7:00 AM Briefing)*` : `🌙 *Good Evening Emman! (7:00 PM Wrap-Up)*`;
+
   return [
-    `☀️ *Morning brief — ${facts.date}*`,
+    greeting,
+    `📅 _${facts.date}_ · 📍 _${facts.city}_ (${facts.weather})`,
     '',
-    `🌤 Weather (${facts.city}): ${facts.weather}`,
+    `🤖 *AI & Gemini News (Work & Portfolio Impact):*`,
+    news.length > 0
+      ? news.slice(0, 3).map((n) => `• *${n.title}*${n.url ? `\n  🔗 [Read Article](${n.url})` : ''}`).join('\n')
+      : `• Explore latest Gemini function-calling and agent orchestration capabilities in Antigravity.`,
     '',
-    `📰 Tech & AI headlines:\n${facts.newsBlock}`,
+    `📋 *Today's To-Dos & Antigravity Queue:*`,
+    todoBlock,
     '',
-    `📊 Your portfolio: ${facts.viewsToday} visits today (${facts.viewsTotal} total).`,
+    `📊 *Portfolio Pulse:* \`${facts.viewsToday}\` visits today (\`${facts.viewsTotal}\` all-time)`,
     '',
-    'Have a great day! — Rush',
+    isMorning
+      ? `🚀 _Have a productive day! Open Antigravity on desktop when ready to build._\n— Rush`
+      : `✨ _Great job today! Rest up or review your notes for tomorrow._\n— Rush`,
   ].join('\n');
 }

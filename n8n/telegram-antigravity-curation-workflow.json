@@ -1,0 +1,350 @@
+{
+  "name": "Telegram Mobile-to-Desktop Antigravity Curation & 7AM/7PM AI News",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "id": "node-telegram-trigger",
+      "name": "Telegram Trigger (Mobile Share)",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 300],
+      "webhookId": "antigravity-curation-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract URL and triage message\nconst msg = $input.first().json.message || {};\nconst text = (msg.text || '').trim();\nconst urlRegex = /(https?:\\/\\/[^\\s]+)/gi;\nconst match = text.match(urlRegex);\nconst extractedUrl = match ? match[0].replace(/[)\\]>,.\"']+$/, '') : null;\n\nconst isQueueCmd = text.startsWith('/queue') || text.startsWith('/q');\nconst isDoneCmd = text.startsWith('/qdone') || text.startsWith('/done');\nconst isCurateCmd = text.startsWith('/curate');\n\nlet actionType = 'curate';\nif (isQueueCmd) actionType = 'show_queue';\nelse if (isDoneCmd) actionType = 'mark_done';\n\nreturn [{\n  json: {\n    chatId: msg.chat?.id,\n    text,\n    url: extractedUrl,\n    hasUrl: Boolean(extractedUrl),\n    actionType,\n    rawMessage: msg,\n    cmdArg: text.split(' ').slice(1).join(' ').trim()\n  }\n}];"
+      },
+      "id": "node-parse-input",
+      "name": "Parse URL & Commands",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.actionType }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "show_queue",
+              "output": 0
+            },
+            {
+              "value2": "mark_done",
+              "output": 1
+            },
+            {
+              "value2": "curate",
+              "output": 2
+            }
+          ]
+        }
+      },
+      "id": "node-switch-action",
+      "name": "Route Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": true
+            }
+          }
+        }
+      },
+      "id": "node-http-scraper",
+      "name": "Scrape Webpage HTML",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 420],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.data || $input.first().json.body || '';\nconst parent = $('Parse URL & Commands').first().json;\n\n// Extract title & OpenGraph description\nconst titleMatch = html.match(/<meta[^>]*property=[\"']og:title[\"'][^>]*content=[\"']([^\"']+)[\"']/i) ||\n                   html.match(/<title[^>]*>([^<]+)<\\/title>/i);\nconst descMatch = html.match(/<meta[^>]*property=[\"']og:description[\"'][^>]*content=[\"']([^\"']+)[\"']/i) ||\n                  html.match(/<meta[^>]*name=[\"']description[\"'][^>]*content=[\"']([^\"']+)[\"']/i);\n\nconst cleanTitle = titleMatch ? titleMatch[1].trim() : (parent.url || 'Curation Item');\nconst cleanDesc = descMatch ? descMatch[1].trim() : '';\n\nreturn [{\n  json: {\n    ...parent,\n    pageTitle: cleanTitle,\n    pageDescription: cleanDesc,\n    htmlSnippet: html.replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').slice(0, 1200)\n  }\n}];"
+      },
+      "id": "node-clean-metadata",
+      "name": "Clean Scraped Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 420]
+    },
+    {
+      "parameters": {
+        "model": "deepseek-chat",
+        "options": {
+          "temperature": 0.3
+        },
+        "messages": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are the AI Curation & Triage Agent for Emman Alcazar Jr (AI Automation & Intelligent Systems Developer).\nEmman's Active Projects: water-station-telegram-bot, portfolio, automated-report-generator, chatbot-api, shared-backend, obsidian-vault.\nTarget Roles: AI Automation Specialist, AI Solutions Developer.\n\nAnalyze the captured link/note and return ONLY valid JSON with keys:\n{\n  \"title\": \"Crisp 4-8 word title\",\n  \"category\": \"career\" | \"project\" | \"idea\" | \"learning\" | \"reference\",\n  \"target_project\": \"water-station-telegram-bot\" | \"portfolio\" | \"automated-report-generator\" | \"chatbot-api\" | \"shared-backend\" | \"obsidian-vault\" | \"new-mvp\" | \"general\",\n  \"priority\": \"high\" | \"medium\" | \"low\",\n  \"summary\": \"1-2 sentence core summary\",\n  \"takeaways\": [\"Bullet 1\", \"Bullet 2\"],\n  \"why_it_matters\": \"Why this matters for Emman's portfolio or projects\",\n  \"antigravity_action\": \"Exact task Antigravity desktop should execute\"\n}"
+            },
+            {
+              "role": "user",
+              "content": "User input: {{ $json.text }}\nURL: {{ $json.url }}\nTitle: {{ $json.pageTitle }}\nDescription: {{ $json.pageDescription }}\nSnippet: {{ $json.htmlSnippet }}"
+            }
+          ]
+        }
+      },
+      "id": "node-ai-triage",
+      "name": "AI Triage (DeepSeek / Gemini)",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [1320, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.message?.content || $input.first().json.response || '';\nconst jsonMatch = raw.match(/\\{[\\s\\S]*\\}/);\nlet analysis = {};\ntry {\n  analysis = JSON.parse(jsonMatch ? jsonMatch[0] : raw);\n} catch (e) {\n  analysis = {\n    title: 'New Curation Item',\n    category: 'idea',\n    target_project: 'general',\n    priority: 'medium',\n    takeaways: ['Review in Antigravity session'],\n    why_it_matters: 'Relevant to ongoing development',\n    antigravity_action: 'Inspect and evaluate in workspace'\n  };\n}\n\nconst parent = $('Clean Scraped Metadata').first().json;\nconst shortId = 'Q-' + Math.floor(100 + Math.random() * 900);\n\nconst cardText = `📥 *Queued for Antigravity* \\`[#${shortId}]\\`\\n\\n📌 *${analysis.title}*\\n📂 *Target:* ${analysis.category.toUpperCase()} → \\`${analysis.target_project}\\`\\n⚡ *Priority:* ${analysis.priority.toUpperCase()}\\n${parent.url ? `🔗 *Link:* ${parent.url}\\n` : ''}\\n💡 *Key Takeaways:*\\n${(analysis.takeaways || []).map(t => '• ' + t).join('\\n')}\\n\\n🎯 *Why this matters:*\\n${analysis.why_it_matters}\\n\\n🛠 *Antigravity Action:*\\n\\`${analysis.antigravity_action}\\`\\n\\n_Synced to Obsidian vault & ready for desktop Antigravity session!_`;\n\nreturn [{\n  json: {\n    ...parent,\n    shortId,\n    analysis,\n    cardText\n  }\n}];"
+      },
+      "id": "node-format-card",
+      "name": "Format Telegram Card",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1540, 420]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.cardText }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "reply_markup": {
+            "inline_keyboard": [
+              [
+                { "text": "💼 Career", "callback_data": "=qcat:" + $json.shortId + ":career" },
+                { "text": "🚀 Project", "callback_data": "=qcat:" + $json.shortId + ":project" }
+              ],
+              [
+                { "text": "💡 New Idea", "callback_data": "=qcat:" + $json.shortId + ":idea" },
+                { "text": "📚 Learning", "callback_data": "=qcat:" + $json.shortId + ":learning" }
+              ],
+              [
+                { "text": "✅ Mark Done", "callback_data": "=qdone:" + $json.shortId }
+              ]
+            ]
+          }
+        }
+      },
+      "id": "node-send-telegram-card",
+      "name": "Send Curation Card to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1780, 420]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 23,11 * * *"
+            }
+          ]
+        }
+      },
+      "id": "node-cron-schedule",
+      "name": "Schedule (7:00 AM & 7:00 PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 700]
+    },
+    {
+      "parameters": {
+        "url": "https://hn.algolia.com/api/v1/search_by_date?query=Gemini%20OR%20DeepMind%20OR%20\"Google%20AI\"&tags=story&hitsPerPage=5"
+      },
+      "id": "node-fetch-gemini-news",
+      "name": "Fetch Gemini & AI News",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 700]
+    },
+    {
+      "parameters": {
+        "url": "https://portfolio-elalcazarjr.vercel.app/api/views"
+      },
+      "id": "node-fetch-portfolio-views",
+      "name": "Fetch Portfolio Views",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 700]
+    },
+    {
+      "parameters": {
+        "model": "deepseek-chat",
+        "messages": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are Rush, writing a high-impact daily AI news & to-do briefing for Emman Alcazar Jr in Manila.\nFormat with:\n1. Warm 7:00 AM/PM greeting with date\n2. 🤖 Gemini & AI News (with 1 line explaining how it benefits Emman's AI automation portfolio)\n3. 📋 Today's Priority To-Dos & Antigravity Actions\n4. 📊 Portfolio view stats & inspiring sign-off as '— Rush'.\nUnder 220 words, clean Markdown."
+            },
+            {
+              "role": "user",
+              "content": "News hits: {{ JSON.stringify($('Fetch Gemini & AI News').first().json.hits) }}\nPortfolio views: {{ JSON.stringify($json) }}"
+            }
+          ]
+        }
+      },
+      "id": "node-ai-briefing-composer",
+      "name": "Compose 7AM/7PM Briefing",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [880, 700]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.OWNER_CHAT_ID || '123456789' }}",
+        "text": "={{ $input.first().json.message?.content || $input.first().json.response }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "node-send-briefing-telegram",
+      "name": "Dispatch Daily Briefing to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1100, 700]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger (Mobile Share)": {
+      "main": [
+        [
+          {
+            "node": "Parse URL & Commands",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse URL & Commands": {
+      "main": [
+        [
+          {
+            "node": "Route Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Action": {
+      "main": [
+        [],
+        [],
+        [
+          {
+            "node": "Scrape Webpage HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Webpage HTML": {
+      "main": [
+        [
+          {
+            "node": "Clean Scraped Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Scraped Metadata": {
+      "main": [
+        [
+          {
+            "node": "AI Triage (DeepSeek / Gemini)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Triage (DeepSeek / Gemini)": {
+      "main": [
+        [
+          {
+            "node": "Format Telegram Card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram Card": {
+      "main": [
+        [
+          {
+            "node": "Send Curation Card to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule (7:00 AM & 7:00 PM)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Gemini & AI News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Gemini & AI News": {
+      "main": [
+        [
+          {
+            "node": "Fetch Portfolio Views",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Portfolio Views": {
+      "main": [
+        [
+          {
+            "node": "Compose 7AM/7PM Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose 7AM/7PM Briefing": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Daily Briefing to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

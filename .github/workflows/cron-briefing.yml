@@ -1,16 +1,17 @@
-name: Assistant cron — daily briefing
+name: Assistant cron — 7am & 7pm AI news & daily briefing
 
 on:
-  # 23:00 UTC = 07:00 Asia/Manila (UTC+8)
+  # 23:00 UTC = 07:00 AM Asia/Manila (Morning Briefing & To-Dos)
+  # 11:00 UTC = 07:00 PM Asia/Manila (Evening AI News & Wrap-Up)
   schedule:
-    - cron: '0 23 * * *'
+    - cron: '0 23,11 * * *'
   workflow_dispatch: {}
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger daily briefing
+      - name: Trigger 7am/7pm briefing
         run: >
           curl -fsS -X POST
           -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
