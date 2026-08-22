@@ -23,6 +23,7 @@ jobs:
         if: steps.ping.outputs.code != '200'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           CODE: ${{ steps.ping.outputs.code }}
         run: |
           BODY="Health endpoint returned HTTP \`$CODE\` at $(date -u '+%Y-%m-%d %H:%M UTC'). Check the Supabase Edge Function logs (dashboard → Edge Functions → telegram-bot → Logs)."
@@ -37,6 +38,7 @@ jobs:
         if: steps.ping.outputs.code == '200'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           ISSUE=$(gh issue list --label watchdog --state open --json number --jq '.[0].number // empty')
           if [ -n "$ISSUE" ]; then
