@@ -1,8 +1,9 @@
 // Cron job: Send 7am & 7pm Daily Briefing
 import { generateBriefing } from '../src/briefing.ts';
 
-const BOT_TOKEN = process.env.BOT_TOKEN || '8616327589:AAFk7E_fj6CnPyezOr8NFQWwFP8gZ6kC3CM';
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '966825617';
+// SECURITY: credentials come from the environment / GitHub Actions secrets only.
+const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 
 async function run() {
   if (!BOT_TOKEN || !TELEGRAM_CHAT_ID) {
@@ -35,8 +36,8 @@ async function run() {
     }),
   });
 
-  const data = await res.json();
-  console.log('Telegram delivery result:', data.ok ? 'SUCCESS' : data);
+  const data = (await res.json()) as { ok?: boolean };
+  console.log('Telegram delivery result:', data.ok ? 'SUCCESS' : JSON.stringify(data));
 }
 
 run().catch((err) => {

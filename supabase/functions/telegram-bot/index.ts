@@ -1,10 +1,18 @@
 // Supabase Edge Function: Telegram Bot Webhook (Pure Deno + Fetch + Real-time Calorie Engine)
 // 100% Dynamic data fetched from Supabase database
+//
+// SECURITY: all credentials come from Supabase secrets (env) — never hardcode them.
+//   Required: BOT_TOKEN, DEEPSEEK_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+//   Hardening: WEBHOOK_SECRET (Telegram signs every update), OWNER_CHAT_ID (owner-only access)
 
-const BOT_TOKEN = Deno.env.get('BOT_TOKEN') || '8616327589:AAFk7E_fj6CnPyezOr8NFQWwFP8gZ6kC3CM';
-const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY') || 'sk-6e88f8d692db4e418d0b5707be6c4f1e';
+const BOT_TOKEN = Deno.env.get('BOT_TOKEN') || '';
+const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY') || '';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || 'https://hulyouteasfuetiqlacq.supabase.co';
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1bHlvdXRlYXNmdWV0aXFsYWNxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzI4MTk1NSwiZXhwIjoyMTAyODU3OTU1fQ.QKJMWT03hO3swtQYyxAfrZA9BgcNY-769Vrr9RzRAA8';
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+const WEBHOOK_SECRET = Deno.env.get('WEBHOOK_SECRET') || '';
+// Owner allowlist: when set, ALL other senders are ignored
+// (protects DeepSeek credits and the database from strangers).
+const OWNER_CHAT_ID = Deno.env.get('OWNER_CHAT_ID') || '';
 const DEFAULT_CALORIE_CAP = 1850;
 
 const SYSTEM_PROMPT = `
@@ -161,6 +169,19 @@ async function insertSupabase(table: string, data: Record<string, unknown>) {
   }
 }
 
+// Webhook authentication: Telegram signs every update with the secret_token
+// given to setWebhook. Fail-closed once WEBHOOK_SECRET is configured.
+if (!WEBHOOK_SECRET) {
+  console.warn(
+    'WEBHOOK_SECRET is NOT set — the webhook accepts unsigned updates. Set it as a Supabase secret and re-register the webhook with secret_token.'
+  );
+}
+
+function isAuthorized(req: Request): boolean {
+  if (!WEBHOOK_SECRET) return true; // fail-open until the secret is configured (see warning)
+  return req.headers.get('x-telegram-bot-api-secret-token') === WEBHOOK_SECRET;
+}
+
 // Deno Webhook Server
 Deno.serve(async (req) => {
   try {
@@ -169,6 +190,11 @@ Deno.serve(async (req) => {
         JSON.stringify({ status: 'active', bot: '@RushDailyBot', engine: 'live-supabase-nutrition' }),
         { headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    if (!isAuthorized(req)) {
+      console.warn('Rejected update with missing/invalid webhook secret token.');
+      return new Response('Unauthorized', { status: 401 });
     }
 
     const update = await req.json();
@@ -180,6 +206,12 @@ Deno.serve(async (req) => {
 
     const chatId = msg.chat.id;
     const text = (msg.text || '').trim();
+
+    // Owner allowlist: silently ignore strangers when configured.
+    if (OWNER_CHAT_ID && String(msg.from?.id || '') !== OWNER_CHAT_ID) {
+      console.warn(`Ignored message from unauthorized sender ${msg.from?.id}`);
+      return new Response('OK', { status: 200 });
+    }
 
     // 1. Photo handling (Meal Logging)
     if (msg.photo && msg.photo.length > 0) {
@@ -289,7 +321,8 @@ Deno.serve(async (req) => {
     // 5. URL Curation
     if (/(https?:\/\/[^\s]+)/gi.test(text)) {
       const url = text.match(/(https?:\/\/[^\s]+)/gi)?.[0] || text;
-      const shortId = 'Q-' + Math.floor(100 + Math.random() * 900);
+      const shortId =
+        'Q-' + new Date().toISOString().replace(/\D/g, '').slice(2, 14); // YYMMDDHHMMSS — collision-proof
       const card = [
         `📥 *Queued for Antigravity* \`[#${shortId}]\``,
         '',

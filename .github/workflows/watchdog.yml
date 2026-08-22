@@ -1,0 +1,44 @@
+name: Health Watchdog
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  ping:
+    name: Ping bot health endpoint
+    runs-on: ubuntu-latest
+    steps:
+      - id: ping
+        run: |
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${{ vars.HEALTH_URL || 'https://hulyouteasfuetiqlacq.supabase.co/functions/v1/telegram-bot' }}")
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "Health endpoint responded with HTTP $CODE"
+
+      - name: File incident issue on failure
+        if: steps.ping.outputs.code != '200'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODE: ${{ steps.ping.outputs.code }}
+        run: |
+          BODY="Health endpoint returned HTTP \`$CODE\` at $(date -u '+%Y-%m-%d %H:%M UTC'). Check the Supabase Edge Function logs (dashboard → Edge Functions → telegram-bot → Logs)."
+          EXISTING=$(gh issue list --label watchdog --state open --json number --jq 'length')
+          if [ "$EXISTING" -eq 0 ]; then
+            gh issue create --label watchdog --title "🚨 Rush Bot is down (HTTP $CODE)" --body "$BODY"
+          else
+            gh issue comment --reuse-last --body "$BODY" 2>/dev/null || true
+          fi
+
+      - name: Auto-close incident on recovery
+        if: steps.ping.outputs.code == '200'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ISSUE=$(gh issue list --label watchdog --state open --json number --jq '.[0].number // empty')
+          if [ -n "$ISSUE" ]; then
+            gh issue close "$ISSUE" --comment "✅ Recovered — HTTP 200 at $(date -u '+%Y-%m-%d %H:%M UTC')."
+          fi

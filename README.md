@@ -1,8 +1,20 @@
 # Rush — Personal Telegram Assistant & Antigravity Curation Bridge 🤖
 
+[![CI](https://github.com/emmanalcazarjr-ops/personal-assistant-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/emmanalcazarjr-ops/personal-assistant-bot/actions/workflows/ci.yml)
+![Tests](https://img.shields.io/badge/tests-37%20passing-brightgreen)
+
 Your own AI assistant inside Telegram and mobile bridge to Antigravity: doomscroll & link curation, AI triage into active projects / career goals, chat with memory, quick notes, reminders, and daily briefings.
 
-Built with **grammY + DeepSeek + Antigravity**, storage is **your Obsidian vault** (a private git repo), and it's deployed on **Vercel** with **GitHub Actions** as the free cron scheduler.
+Built with **grammY + DeepSeek + Antigravity**, storage is **your Obsidian vault** (a private git repo), deployed 24/7 on a **Supabase Edge Function** (webhook) with **GitHub Actions** as cron scheduler + uptime watchdog — zero PC uptime needed.
+
+## Production Engineering
+
+- ✅ **CI pipeline** — every push runs typecheck + unit tests (vitest) on GitHub Actions
+- ✅ **37 unit tests** covering intent classification, calorie math, natural-language time parsing
+- ✅ **Uptime watchdog** — GitHub Action pings the health endpoint every 30 min; auto-opens an issue when down, auto-closes on recovery
+- ✅ **Webhook authentication** — Telegram `secret_token` verification rejects forged updates
+- ✅ **Owner allowlist** — when `OWNER_CHAT_ID` is set, all other senders are ignored (no AI credit burn, no vault writes from strangers)
+- ✅ **Fail-safe AI fallbacks** — nutrition/intent engines degrade to rule-based estimates instead of erroring
 
 ## Features
 
@@ -106,3 +118,15 @@ Set environment variables in Vercel: `BOT_TOKEN`, `WEBHOOK_SECRET`, `CRON_SECRET
 npm run set-webhook
 npm run get-webhook   # verify
 ```
+
+### 7. Supabase Edge deployment (24/7, free)
+The production bot runs as a Supabase Edge Function (`supabase/functions/telegram-bot/`).
+Required Supabase secrets: `BOT_TOKEN`, `DEEPSEEK_API_KEY`, `VAULT_PAT`, plus for hardening:
+`WEBHOOK_SECRET` (rejects forged Telegram updates) and `OWNER_CHAT_ID` (owner-only access).
+After setting `WEBHOOK_SECRET`, re-register the webhook so Telegram signs every update:
+
+```bash
+# .env: WEBHOOK_URL=https://<ref>.supabase.co/functions/v1/telegram-bot
+npm run set-webhook
+```
+

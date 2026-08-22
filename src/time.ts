@@ -24,20 +24,21 @@ export interface ParsedTime {
   rest: string;
 }
 
-/** Find a phrase like "in 30 minutes" / "in 2 hours" / "in 1 hour 30 min". */
+/** Find a phrase like "in 30 minutes" / "in 2 hours" / "in 1 hour 30 min".
+ * Alternation is longest-first so "minutes" is consumed fully (not "minute" + stray "s"). */
 function parseRelative(text: string, now: Date): { due: Date; phrase: string } | null {
   const m = text.match(
-    /\bin\s+(\d+)\s*(hour|hours|hr|hrs|h|minute|minutes|min|mins|m|day|days)(?:\s*(?:and\s*)?(\d+)\s*(minute|minutes|min|mins|m))?/i
+    /\bin\s+(\d+)\s*(hours?|hrs?|hr|h|minutes?|mins?|min|m|days?)(?:\s*(?:and\s*)?(\d+)\s*(minutes?|mins?|min|m))?/i
   );
   if (!m) return null;
   let minutes = 0;
   const unit = m[2].toLowerCase();
   const amount = Number(m[1]);
-  if (unit.startsWith('hour') || unit === 'hr' || unit === 'hrs' || unit === 'h') minutes += amount * 60;
-  else if (unit.startsWith('day')) minutes += amount * 1440;
+  if (unit.startsWith('h')) minutes += amount * 60;
+  else if (unit.startsWith('d')) minutes += amount * 1440;
   else minutes += amount;
   if (m[3] && m[4]) {
-    minutes += Number(m[3]) * (m[4].toLowerCase().startsWith('min') ? 1 : 60);
+    minutes += Number(m[3]); // second group only accepts minute units
   }
   const due = new Date(now.getTime() + minutes * 60000);
   return { due, phrase: m[0] };
@@ -65,7 +66,7 @@ function parseClock(text: string): { hours: number; minutes: number; phrase: str
 }
 
 /** Find a day word: "tomorrow", "tonight", weekday names. */
-function parseDay(text: string): { dayOffset: number; phrase: string } | null {
+function parseDay(text: string, now = new Date()): { dayOffset: number; phrase: string } | null {
   if (/\btomorrow\b/i.test(text)) return { dayOffset: 1, phrase: 'tomorrow' };
   if (/\btonight\b/i.test(text)) return { dayOffset: 0, phrase: 'tonight' };
   for (let i = 0; i < WEEKDAYS.length; i++) {
@@ -73,13 +74,23 @@ function parseDay(text: string): { dayOffset: number; phrase: string } | null {
     const m = text.match(re);
     if (m) {
       const target = i;
-      const today = new Date().getDay();
+      const today = now.getDay();
       let offset = (target - today + 7) % 7;
       if (offset === 0) offset = 7; // next week, not today
       return { dayOffset: offset, phrase: m[0] };
     }
   }
   return null;
+}
+
+/** Strip leftover whitespace, leading/trailing punctuation and dangling conjunctions ("call mom at"). */
+function cleanRest(text: string): string {
+  return text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[\s,]+/, '')
+    .replace(/\s+(at|by|on|in)$/i, '')
+    .replace(/[,\s]+$/g, '');
 }
 
 export function extractReminderTime(input: string, now = new Date()): ParsedTime | null {
@@ -89,11 +100,10 @@ export function extractReminderTime(input: string, now = new Date()): ParsedTime
 
   const relative = parseRelative(text, now);
   if (relative) {
-    const rest = text.replace(relative.phrase, '').replace(/\s+/g, ' ').trim().replace(/[,\s]+$/g, '');
-    return { due: relative.due, rest };
+    return { due: relative.due, rest: cleanRest(text.replace(relative.phrase, '')) };
   }
 
-  const day = parseDay(text);
+  const day = parseDay(text, now);
   const clock = parseClock(text);
 
   if (!day && !clock) return null;
@@ -119,9 +129,8 @@ export function extractReminderTime(input: string, now = new Date()): ParsedTime
   let rest = text;
   if (clock) rest = rest.replace(clock.phrase, '');
   if (day) rest = rest.replace(day.phrase, '');
-  rest = rest.replace(/\s+/g, ' ').trim().replace(/^[,\s]+|[,\s]+$/g, '');
 
-  return { due: base, rest };
+  return { due: base, rest: cleanRest(rest) };
 }
 
 /** Human-friendly formatting for reminder listings. */
