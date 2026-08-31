@@ -5,7 +5,7 @@
 
 Your own AI assistant inside Telegram and mobile bridge to Antigravity: doomscroll & link curation, AI triage into active projects / career goals, chat with memory, quick notes, reminders, and daily briefings.
 
-Built with **grammY + DeepSeek + Antigravity**, storage is **your Obsidian vault** (a private git repo), deployed 24/7 on a **Supabase Edge Function** (webhook) with **GitHub Actions** as cron scheduler + uptime watchdog — zero PC uptime needed.
+Built with **grammY + Google Gemini + Antigravity**, storage is **your Obsidian vault** (a private git repo), deployed 24/7 on a **Supabase Edge Function** (webhook) with **GitHub Actions** as cron scheduler + uptime watchdog — zero PC uptime needed.
 
 ## Production Engineering
 
@@ -23,10 +23,10 @@ Built with **grammY + DeepSeek + Antigravity**, storage is **your Obsidian vault
 | 📥 **Doomscroll & Link Curation** | Share/forward any URL, tweet, repo, job posting, or idea on your phone. Scrapes content, analyzes relevance via AI, extracts takeaways + action item, and queues it for Antigravity desktop. |
 | 💼 **AI Triage & Categorization** | Automatically routes items to: 💼 `Career & Portfolio`, 🚀 `Active Projects` (water-station, portfolio, report-generator, chatbot-api), 💡 `New MVP Ideas`, or 📚 `Learning`. |
 | 💻 **Antigravity Desktop Bridge** | View and execute tasks with `.agents/skills/curation-queue/` or `npm run queue`. 1-click execution in your codebase. |
-| 💬 **AI chat with memory** | Plain messages go to DeepSeek (`deepseek-chat`) with the last ~12 turns of chat history. `/forget` clears it. |
+| 💬 **AI chat with memory** | Plain messages go to Google Gemini (`gemini-3.7-flash`) with the last ~12 turns of chat history. `/forget` clears it. |
 | 📝 **Notes → Obsidian** | `/note Buy milk #groceries` writes a real markdown file into your vault at `data/assistant/notes/`. `/notes [search]`, `/delnote <id>`. |
 | ⏰ **Reminders** | `/remind water plants at 6pm`, `/remind stretch in 30 minutes`, `/remind call mom tomorrow 8am`. Natural-language times. Stored in `data/assistant/reminders.json`. |
-| ☀️ **Daily briefing** | Weather (Open-Meteo, no key) + top tech/AI headlines (Hacker News) + portfolio view counter, wrapped into a warm brief by DeepSeek. |
+| ☀️ **Daily briefing** | Weather (Open-Meteo, no key) + top tech/AI headlines (Hacker News) + portfolio view counter, wrapped into a warm brief by Google Gemini. |
 | 🔐 **Private by design** | The vault repo is private; data lives under `data/`, never in the published `notes/` folder. |
 
 ## Commands

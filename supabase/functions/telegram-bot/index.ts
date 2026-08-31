@@ -89,67 +89,79 @@ function renderProgressBar(current: number, target = DEFAULT_CALORIE_CAP): strin
   return `\`[${bar}]\` **${current.toLocaleString()} / ${target.toLocaleString()} kcal** (${pct}%)`;
 }
 
-// Helper: Estimate meal calories & macros via DeepSeek AI
-async function estimateMealNutrition(description: string): Promise<{ meal: string; calories: number; protein: number; carbs: number; fat: number }> {
-  try {
-    const res = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          {
-            role: 'system',
-            content: `You are an expert nutritionist. Estimate realistic calories and macronutrients for the meal description.
-Return ONLY valid JSON matching this exact structure with no extra markdown:
-{"meal": "Short clean meal name", "calories": 450, "protein": 25, "carbs": 45, "fat": 15}`,
-          },
-          { role: 'user', content: description },
-        ],
-        temperature: 0.1,
-      }),
-    });
+const GEMINI_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash-lite'];
 
-    const data = await res.json();
-    const raw = data.choices?.[0]?.message?.content || '{}';
-    const clean = raw.replace(/```json/g, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(clean);
-    return {
-      meal: parsed.meal || description.slice(0, 40),
-      calories: Number(parsed.calories) || 450,
-      protein: Number(parsed.protein) || 20,
-      carbs: Number(parsed.carbs) || 40,
-      fat: Number(parsed.fat) || 15,
-    };
-  } catch {
-    return { meal: description.slice(0, 40), calories: 450, protein: 20, carbs: 40, fat: 15 };
+// Helper: Estimate meal calories & macros via Google Gemini AI
+async function estimateMealNutrition(description: string): Promise<{ meal: string; calories: number; protein: number; carbs: number; fat: number }> {
+  for (const model of GEMINI_MODELS) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: {
+            parts: [{
+              text: 'You are an expert nutritionist. Estimate realistic calories and macronutrients for the meal description. Return ONLY valid JSON with keys: meal, calories, protein, carbs, fat.'
+            }]
+          },
+          contents: [{ role: 'user', parts: [{ text: description }] }],
+          generationConfig: {
+            response_mime_type: 'application/json',
+            temperature: 0.2,
+            maxOutputTokens: 200,
+          },
+        }),
+      });
+
+      if (!res.ok) continue;
+      const data = await res.json() as any;
+      const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!content) continue;
+      const parsed = JSON.parse(content);
+      return {
+        meal: parsed.meal || description.slice(0, 40),
+        calories: Number(parsed.calories) || 450,
+        protein: Number(parsed.protein) || 20,
+        carbs: Number(parsed.carbs) || 40,
+        fat: Number(parsed.fat) || 15,
+      };
+    } catch {
+      continue;
+    }
   }
+  return { meal: description.slice(0, 40), calories: 450, protein: 20, carbs: 40, fat: 15 };
 }
 
-// Helper: DeepSeek general chat
+// Helper: Google Gemini general chat
 async function callDeepSeek(messages: { role: string; content: string }[]) {
-  try {
-    const res = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages,
-        temperature: 0.3,
-        max_tokens: 300,
-      }),
-    });
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || 'Understood, sir. Standing by.';
-  } catch {
-    return 'Understood, sir. Standing by.';
+  const contents = messages.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }]
+  }));
+
+  for (const model of GEMINI_MODELS) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents,
+          generationConfig: {
+            temperature: 0.4,
+            maxOutputTokens: 300,
+          },
+        }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json() as any;
+      const content = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (content) return content;
+    } catch {
+      continue;
+    }
   }
+  return 'Understood, sir. Standing by.';
 }
 
 // Helper: Insert record into Supabase table
