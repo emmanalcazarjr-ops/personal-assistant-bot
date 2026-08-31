@@ -1,0 +1,47 @@
+name: Diagnose & Register Bot Webhook
+
+on:
+  workflow_dispatch:
+    inputs:
+      webhook_url:
+        description: 'New Webhook URL to register (leave empty to just inspect current status)'
+        required: false
+        default: ''
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect Webhook Status
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          echo "=== Bot Profile Info ==="
+          curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getMe" | jq .
+          
+          echo "=== Current Webhook Info ==="
+          curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo" | jq .
+
+      - name: Update Webhook (if requested)
+        if: "${{ github.event.inputs.webhook_url != '' }}"
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          WEBHOOK_URL: ${{ github.event.inputs.webhook_url }}
+        run: |
+          echo "Setting webhook to: $WEBHOOK_URL"
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
+            -H "Content-Type: application/json" \
+            -d "{\"url\": \"$WEBHOOK_URL\", \"allowed_updates\": [\"message\", \"callback_query\"]}" | jq .
+
+      - name: Send Test Ping to Owner
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -n "$TELEGRAM_CHAT_ID" ]; then
+            echo "Sending diagnostic ping to chat: $TELEGRAM_CHAT_ID"
+            curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+              -H "Content-Type: application/json" \
+              -d "{\"chat_id\": $TELEGRAM_CHAT_ID, \"text\": \"🤖 Rush diagnostic checkup initiated, sir.\"}" | jq .
+          fi
