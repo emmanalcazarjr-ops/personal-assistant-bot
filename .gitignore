@@ -9,3 +9,12 @@ dist/
 Thumbs.db
 supabase/.temp/
 .npm-cache/
+
+# Secrets and credentials
+.env*
+*.pem
+*.key
+*.token
+credentials.json
+id_rsa*
+*.secret
