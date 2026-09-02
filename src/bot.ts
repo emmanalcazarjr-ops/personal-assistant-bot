@@ -4,7 +4,7 @@
  * Handles Food/Calories, Career/Curation, Reminders, Notes, and Briefings autonomously.
  */
 import { Bot, Keyboard } from 'grammy';
-import { config, hasDeepSeek, hasVault } from './config.ts';
+import { config, hasDeepSeek, hasGemini, hasVault } from './config.ts';
 import * as vault from './vault.ts';
 import { chatCompletion, DeepSeekError } from './deepseek.ts';
 import { extractReminderTime, formatDue } from './time.ts';
@@ -436,7 +436,7 @@ async function handleConversationalChat(ctx: any, text: string) {
   } catch (e) {
     if (e instanceof DeepSeekError && e.message.includes('not set')) {
       reply =
-        "⚠️ My AI brain isn't switched on yet — the DEEPSEEK_API_KEY hasn't been configured.\n\nMeanwhile I can still help you with food tracking, curation, and notes, sir.";
+        "⚠️ My AI brain isn't switched on yet — the GEMINI_API_KEY hasn't been configured.\n\nMeanwhile I can still help you with food tracking, curation, and notes, sir.";
     } else {
       console.error('chat failed:', e);
       reply = '⚠️ I hit a snag connecting to the AI brain. Give me a moment and try again, sir!';

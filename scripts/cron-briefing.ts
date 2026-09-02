@@ -3,12 +3,12 @@ import { generateBriefing } from '../src/briefing.ts';
 
 // SECURITY: credentials come from the environment / GitHub Actions secrets only.
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || process.env.OWNER_CHAT_ID || '';
 
 async function run() {
   if (!BOT_TOKEN || !TELEGRAM_CHAT_ID) {
-    console.log('BOT_TOKEN or TELEGRAM_CHAT_ID missing. Exiting cleanly.');
-    process.exit(0);
+    console.error('BOT_TOKEN or TELEGRAM_CHAT_ID missing. Exiting with error.');
+    process.exit(1);
   }
 
   // Determine morning vs evening Manila time
@@ -32,15 +32,21 @@ async function run() {
     body: JSON.stringify({
       chat_id: Number(TELEGRAM_CHAT_ID),
       text: briefingText,
-      parse_mode: 'Markdown',
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
     }),
   });
 
-  const data = (await res.json()) as { ok?: boolean };
-  console.log('Telegram delivery result:', data.ok ? 'SUCCESS' : JSON.stringify(data));
+  const data = (await res.json()) as { ok?: boolean; description?: string };
+  if (!data.ok) {
+    console.error('Telegram delivery failed:', data.description || JSON.stringify(data));
+    process.exit(1);
+  }
+
+  console.log('Telegram delivery result: SUCCESS');
 }
 
 run().catch((err) => {
   console.error('Briefing cron runner error:', err);
-  process.exit(0);
+  process.exit(1);
 });

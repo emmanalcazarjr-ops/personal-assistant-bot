@@ -2,13 +2,15 @@
  * Google Gemini / LLM chat completions client.
  * Fails gracefully so callers can fall back to friendly messages.
  */
-import { config } from './config.ts';
+import { config, hasGemini } from './config.ts';
 
 const GEMINI_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
   'gemini-3.7-flash',
   'gemini-3.6-flash',
   'gemini-3.5-flash-lite',
-  'gemini-2.5-flash-lite',
 ];
 const TIMEOUT_MS = 45_000;
 

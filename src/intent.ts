@@ -10,7 +10,7 @@
  * 6. ☀️ Daily Briefing ("give me my morning briefing", "what's on today?")
  * 7. 💬 General Conversation & Assistance
  */
-import { hasDeepSeek } from './config.ts';
+import { hasDeepSeek, hasGemini } from './config.ts';
 import { chatCompletion } from './deepseek.ts';
 import { extractUrl } from './curation.ts';
 
@@ -135,8 +135,8 @@ export async function classifyIntent(text: string, isForward = false): Promise<I
     return fast;
   }
 
-  // Use DeepSeek AI to automatically analyze intent
-  if (hasDeepSeek()) {
+  // Use Gemini/AI to automatically analyze intent
+  if (hasDeepSeek() || hasGemini()) {
     try {
       const raw = await chatCompletion([
         { role: 'system', content: INTENT_CLASSIFICATION_PROMPT.trim() },

@@ -8,7 +8,7 @@
  * - Macro estimation: Calories, Protein, Carbs, Fat
  * - Visual progress bars and polite professional-casual butler responses ("sir")
  */
-import { config, hasDeepSeek } from './config.ts';
+import { config, hasDeepSeek, hasGemini } from './config.ts';
 import { chatCompletion } from './deepseek.ts';
 
 export const DEFAULT_CALORIE_CAP = 1850;
@@ -145,7 +145,7 @@ function fallbackCalorieAnalysis(text: string): CalorieAnalysis {
 
 /** Analyze meal from text description */
 export async function analyzeMealText(text: string): Promise<CalorieAnalysis> {
-  if (!hasDeepSeek()) {
+  if (!hasDeepSeek() && !hasGemini()) {
     return fallbackCalorieAnalysis(text);
   }
 

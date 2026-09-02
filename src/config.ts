@@ -8,7 +8,7 @@ export const config = {
   cronSecret: process.env.CRON_SECRET || '',
   vaultPat: process.env.VAULT_PAT || '',
   geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
-  deepseekApiKey: process.env.DEEPSEEK_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
+  deepseekApiKey: process.env.DEEPSEEK_API_KEY || '',
   ownerChatId: process.env.OWNER_CHAT_ID || '',
   weather: {
     city: process.env.WEATHER_CITY || 'Manila',
@@ -21,6 +21,10 @@ export const config = {
 /** True when the Obsidian vault backend is wired up (VAULT_PAT set). */
 export function hasVault(): boolean {
   return Boolean(config.vaultPat);
+}
+
+export function hasGemini(): boolean {
+  return Boolean(config.geminiApiKey);
 }
 
 export function hasDeepSeek(): boolean {
