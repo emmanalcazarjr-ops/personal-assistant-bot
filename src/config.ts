@@ -7,7 +7,7 @@ export const config = {
   webhookSecret: process.env.WEBHOOK_SECRET || '',
   cronSecret: process.env.CRON_SECRET || '',
   vaultPat: process.env.VAULT_PAT || '',
-  geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
+  geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.DEEPSEEK_API_KEY || '',
   deepseekApiKey: process.env.DEEPSEEK_API_KEY || '',
   ownerChatId: process.env.OWNER_CHAT_ID || '',
   weather: {
