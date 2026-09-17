@@ -1,14 +1,14 @@
-/**
- * Rush — your personal Telegram assistant.
- * 100% natural language AI butler + automatic intent analysis (no commands required).
- * Handles Food/Calories, Career/Curation, Reminders, Notes, and Briefings autonomously.
+﻿/**
+ * Rush — your personal Telegram assistant & AI Coding Butler.
+ * 100% natural language AI co-pilot + automatic intent analysis (no commands required).
+ * Handles Daily AI Coding Micro-Projects, GitHub Streaks, Curation, Reminders, Notes, and Briefings.
  */
-import { Bot, Keyboard } from 'grammy';
+import { Bot, Keyboard, InlineKeyboard } from 'grammy';
 import { config, hasDeepSeek, hasGemini, hasVault } from './config.ts';
 import * as vault from './vault.ts';
 import { chatCompletion, DeepSeekError } from './deepseek.ts';
 import { extractReminderTime, formatDue } from './time.ts';
-import { generateBriefing } from './briefing.ts';
+import { generateBriefing, fetchAiNews } from './briefing.ts';
 import {
   analyzeCurationItem,
   extractUrl,
@@ -18,38 +18,46 @@ import {
   type CurationCategory,
 } from './curation.ts';
 import {
-  analyzeMealPhoto,
-  analyzeMealText,
-  formatDailyCalorieSummary,
-  formatMealLoggedCard,
-  DEFAULT_CALORIE_CAP,
-} from './calories.ts';
+  generateDailyCodingChallenge,
+  formatCodingChallengeCard,
+  formatBoilerplateCard,
+  type CodingChallenge,
+} from './coding-challenge.ts';
+import {
+  fetchGitHubStreak,
+  formatStreakCard,
+  createGitHubGist,
+} from './github-streak.ts';
 import { classifyIntent, type IntentResult } from './intent.ts';
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'RushDailyBot';
 
+// Cache latest active challenge in memory
+let cachedChallenge: CodingChallenge | null = null;
+
 const NATURAL_GUIDE_TEXT = [
-  '🎩 *Rush — Personal AI Butler & Antigravity Bridge*',
+  '🎩 <b>Rush — Personal AI Butler & Daily Coding Co-Pilot</b>',
   '',
-  'You do not need to use any commands, sir! You can simply message me naturally, and I will automatically handle the rest:',
+  'You do not need to use any commands, sir! You can simply message me naturally:',
   '',
-  '🥗 *Food & Calorie Tracking (1,850 kcal cap)*',
-  '• *Send a photo of your plate* ➔ I will automatically estimate portions, calculate calories/macros, and update your daily ledger.',
-  '• *Type what you ate* (e.g. _"Had 2 eggs, 1 cup of white rice, and chicken breast"_) ➔ I log your nutrition and show your live progress bar.',
-  '• *Ask about your intake* (e.g. _"How many calories do I have left today?"_) ➔ I will show your daily breakdown.',
+  '⚡ <b>Daily AI Coding Micro-Projects</b>',
+  '• <i>"What should I code today?"</i> or tap <b>⚡ Daily Coding Task</b> ➔ I generate 1 high-leverage 15–30 min coding challenge grounded in trending AI news.',
+  '• <i>"Generate the boilerplate"</i> ➔ I emit clean, runnable starter code with setup commands.',
   '',
-  '📥 *Career & Antigravity Curation*',
-  '• *Share or forward any link, tweet, repo, or idea* ➔ I triage it into Career/Projects/Ideas/Learning and sync it directly to your desktop Antigravity queue.',
+  '🔥 <b>GitHub Contribution Streak Watchdog</b>',
+  '• <i>"How\'s my GitHub streak?"</i> or tap <b>🔥 GitHub Streak</b> ➔ Live GitHub API verification of today\'s commit count and active streak.',
+  '• At <b>7:00 PM</b>, I verify your daily commits and alert you if code hasn\'t been pushed yet.',
   '',
-  '⏰ *Reminders & Notes*',
-  '• *Tell me what to remember* (e.g. _"Remind me to deploy the bot at 6pm"_ or _"Don\'t let me forget the meeting tomorrow at 9am"_).',
-  '• *Jot down a quick thought* (e.g. _"Note: look into Supabase connection pooling #backend"_).',
+  '📥 <b>Career & Antigravity Curation</b>',
+  '• Share/forward any link, tweet, repo, or idea ➔ I triage it and sync it directly to your desktop Antigravity queue.',
   '',
-  '☀️ *Daily Briefings*',
-  '• *Ask anytime* (e.g. _"Give me my morning briefing"_ or _"What\'s the news today?"_).',
-  '• I also deliver your automatic briefing at **7:00 AM** and **7:00 PM** daily.',
+  '⏰ <b>Reminders & Notes</b>',
+  '• <i>"Remind me to push code at 5pm"</i> or <i>"Note down: new agent pattern #ai"</i>.',
   '',
-  '_At your service, sir._',
+  '☀️ <b>Daily Briefings</b>',
+  '• Morning (7:00 AM) AI news & micro-project + Evening (7:00 PM) streak watchdog.',
+  '',
+  '<i>At your service, sir.</i>',
 ].join('\n');
 
 function systemPrompt(): string {
@@ -58,10 +66,10 @@ function systemPrompt(): string {
     dateStyle: 'full',
   }).format(new Date());
   return [
-    'You are Rush, a polished, professional yet casually courteous personal AI assistant and butler for Emman (address him as "sir").',
-    'CRITICAL RULE: Keep ALL responses as short, crisp, and direct as possible (1-3 sentences maximum).',
+    'You are Rush, a sharp, executive AI butler and expert coding co-pilot for Emman (address him as "sir").',
+    'CRITICAL RULE: Keep ALL responses as short, crisp, and direct as possible (1-3 sentences or direct cards/snippets).',
     'Do NOT provide lengthy explanations, lists, or essays UNLESS sir explicitly asks you to expound, elaborate, or explain in detail.',
-    'Use a natural professional-casual tone (e.g. "Good morning, sir", "Right away, sir", "Understood, sir"). Zero corporate fluff or filler.',
+    'Use a natural professional-casual tone (e.g. "Good morning, sir", "Right away, sir", "Understood, sir"). Zero corporate fluff.',
     'If you are unsure about something, state so plainly in one sentence.',
     `Today is ${today}.`,
   ].join(' ');
@@ -69,13 +77,15 @@ function systemPrompt(): string {
 
 function menuKeyboard() {
   return new Keyboard()
-    .text('🥗 Today\'s Calories')
+    .text('⚡ Daily Coding Task')
+    .text('🔥 GitHub Streak')
+    .row()
     .text('📥 My Queue')
-    .row()
     .text('☀️ Daily Briefing')
-    .text('📋 My Notes')
     .row()
+    .text('📋 My Notes')
     .text('⏰ My Reminders')
+    .row()
     .text('❓ How to use')
     .resized();
 }
@@ -89,26 +99,29 @@ export function createBot(): Bot {
     const name = ctx.from?.first_name || 'sir';
     await ctx.reply(
       [
-        `Good day, ${name}! 👋 I am *Rush*, your personal AI assistant and butler.`,
+        `Good day, ${name}! 👋 I am <b>Rush</b>, your personal AI butler and daily coding co-pilot.`,
         '',
-        'You don\'t need any commands—just talk to me naturally:',
-        '• 📸 Send a food picture or type what you ate to count calories (1,850 kcal cap)',
-        '• 🔗 Share/forward any link or idea to add it to your Antigravity desktop queue',
+        'Everything is 100% natural language:',
+        '• ⚡ Ask <i>"What should I code today?"</i> for daily AI micro-projects',
+        '• 🔥 Ask <i>"How\'s my streak?"</i> to monitor your GitHub commit momentum',
+        '• 🔗 Share/forward any link to queue it for desktop Antigravity work',
         '• ⏰ Ask me to set reminders or take notes',
-        '• 💬 Ask me anything else anytime',
       ].join('\n'),
-      { reply_markup: menuKeyboard(), parse_mode: 'Markdown' }
+      { reply_markup: menuKeyboard(), parse_mode: 'HTML' }
     );
     void vault.addMessage(ctx.chat.id, 'system', 'Started the assistant');
   });
 
   bot.command('help', async (ctx) => {
-    await ctx.reply(NATURAL_GUIDE_TEXT, { parse_mode: 'Markdown' });
+    await ctx.reply(NATURAL_GUIDE_TEXT, { parse_mode: 'HTML' });
   });
 
   // ---------- Menu Button Listeners ----------
-  bot.hears(/🥗 Today's Calories|calories/i, async (ctx) => {
-    await showCalories(ctx);
+  bot.hears(/⚡ Daily Coding Task|daily\s+coding|coding\s+challenge/i, async (ctx) => {
+    await handleCodingChallenge(ctx);
+  });
+  bot.hears(/🔥 GitHub Streak|github\s+streak|my\s+streak/i, async (ctx) => {
+    await showGitHubStreak(ctx);
   });
   bot.hears(/📥 My Queue|queue/i, async (ctx) => {
     await showQueue(ctx);
@@ -116,7 +129,7 @@ export function createBot(): Bot {
   bot.hears(/☀️ Daily Briefing|briefing/i, async (ctx) => {
     await ctx.replyWithChatAction('typing');
     const text = await generateBriefing();
-    await ctx.reply(text, { parse_mode: 'Markdown' });
+    await ctx.reply(text, { parse_mode: 'HTML' });
   });
   bot.hears(/📋 My Notes|notes/i, async (ctx) => {
     await showNotes(ctx);
@@ -125,58 +138,42 @@ export function createBot(): Bot {
     await showReminders(ctx);
   });
   bot.hears(/❓ How to use|help/i, (ctx) =>
-    ctx.reply(NATURAL_GUIDE_TEXT, { parse_mode: 'Markdown' })
+    ctx.reply(NATURAL_GUIDE_TEXT, { parse_mode: 'HTML' })
   );
 
-  // ---------- Photo Handler (Automatic Multimodal Food & Calorie Recognition) ----------
-  bot.on('message:photo', async (ctx) => {
-    const photos = ctx.message.photo;
-    if (!photos || photos.length === 0) return;
-    const photo = photos[photos.length - 1]; // Highest resolution image
-
-    await ctx.replyWithChatAction('typing');
-    try {
-      const file = await ctx.api.getFile(photo.file_id);
-      if (!file.file_path) throw new Error('No file path returned by Telegram');
-
-      const downloadUrl = `https://api.telegram.org/file/bot${config.botToken}/${file.file_path}`;
-      const res = await fetch(downloadUrl);
-      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-
-      const buffer = Buffer.from(await res.arrayBuffer());
-      const caption = ctx.message.caption;
-
-      const analysis = await analyzeMealPhoto(buffer, 'image/jpeg', caption);
-      const result = await vault.addMealLog(
-        ctx.chat.id,
-        analysis,
-        'photo',
-        caption || 'Meal photo'
-      );
-
-      if (!result) {
-        await ctx.reply('⚠️ Unable to record meal into your calorie ledger, sir.');
-        return;
-      }
-
-      const card = formatMealLoggedCard(result.meal, result.daily);
-      await ctx.reply(card, { parse_mode: 'Markdown' });
-    } catch (err) {
-      console.error('Meal photo processing error:', err);
-      await ctx.reply(
-        '⚠️ Failed to analyze meal photo. You can also tell me what you ate in plain text, sir.',
-        { parse_mode: 'Markdown' }
-      );
-    }
-  });
-
-  // ---------- Inline Keyboard Callback Queries (Queue Actions) ----------
+  // ---------- Inline Keyboard Callback Queries ----------
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data;
     await ctx.answerCallbackQuery().catch(() => {});
 
     try {
-      if (data.startsWith('qcat:')) {
+      if (data === 'gen_boilerplate') {
+        await ctx.replyWithChatAction('typing');
+        if (!cachedChallenge) {
+          const news = await fetchAiNews();
+          cachedChallenge = await generateDailyCodingChallenge(news.map((n) => n.title));
+        }
+        const card = formatBoilerplateCard(cachedChallenge);
+        const scaffoldKeyboard = new InlineKeyboard()
+          .text('🌐 Create GitHub Gist', 'scaffold_gist');
+        await ctx.reply(card, { parse_mode: 'HTML', reply_markup: scaffoldKeyboard });
+      } else if (data === 'scaffold_gist') {
+        await ctx.replyWithChatAction('typing');
+        if (!cachedChallenge) {
+          await ctx.reply('No active coding challenge found to scaffold, sir.');
+          return;
+        }
+        const gistUrl = await createGitHubGist(
+          cachedChallenge.boilerplate.filename,
+          cachedChallenge.boilerplate.code,
+          `Rush AI Daily Challenge: ${cachedChallenge.title}`
+        );
+        if (gistUrl) {
+          await ctx.reply(`✅ <b>GitHub Gist Scaffolded!</b>\n\n🔗 <a href="${gistUrl}">View on GitHub</a>\n\nClone and run: <code>${cachedChallenge.boilerplate.runCommand}</code>`, { parse_mode: 'HTML' });
+        } else {
+          await ctx.reply('⚠️ Unable to create GitHub Gist. Make sure GITHUB_TOKEN / VAULT_PAT has gist permissions, sir.');
+        }
+      } else if (data.startsWith('qcat:')) {
         const parts = data.split(':');
         const itemId = parts[1];
         const newCategory = parts[2] as CurationCategory;
@@ -238,14 +235,18 @@ export function createBot(): Bot {
     const intentResult: IntentResult = await classifyIntent(text, isForward);
 
     switch (intentResult.intent) {
-      case 'food_log': {
-        const foodDesc = intentResult.extracted?.food_description || text;
-        await handleMealTextLogging(ctx, foodDesc);
+      case 'coding_challenge': {
+        await handleCodingChallenge(ctx);
         break;
       }
 
-      case 'food_query': {
-        await showCalories(ctx);
+      case 'generate_boilerplate': {
+        await handleGenerateBoilerplate(ctx);
+        break;
+      }
+
+      case 'github_streak': {
+        await showGitHubStreak(ctx);
         break;
       }
 
@@ -266,7 +267,7 @@ export function createBot(): Bot {
 
       case 'briefing': {
         const briefingText = await generateBriefing();
-        await ctx.reply(briefingText, { parse_mode: 'Markdown' });
+        await ctx.reply(briefingText, { parse_mode: 'HTML' });
         break;
       }
 
@@ -281,26 +282,41 @@ export function createBot(): Bot {
   return bot;
 }
 
-/** 1. Show Calorie Ledger Status */
-async function showCalories(ctx: any) {
-  const daily = await vault.getDailyCalories();
-  const text = formatDailyCalorieSummary(daily);
-  await ctx.reply(text, { parse_mode: 'Markdown' });
+/** 1. Handle Daily AI Coding Challenge */
+async function handleCodingChallenge(ctx: any) {
+  await ctx.replyWithChatAction('typing');
+  const news = await fetchAiNews();
+  cachedChallenge = await generateDailyCodingChallenge(news.map((n) => n.title));
+  const card = formatCodingChallengeCard(cachedChallenge);
+
+  const keyboard = new InlineKeyboard()
+    .text('🚀 Generate Starter Boilerplate', 'gen_boilerplate');
+
+  await ctx.reply(card, { parse_mode: 'HTML', reply_markup: keyboard });
 }
 
-/** 2. Log Food from Natural Text */
-async function handleMealTextLogging(ctx: any, text: string) {
-  const analysis = await analyzeMealText(text);
-  const result = await vault.addMealLog(ctx.chat.id, analysis, 'text', text);
-  if (!result) {
-    await ctx.reply('⚠️ Failed to save meal to your calorie ledger, sir.');
-    return;
+/** 2. Handle Starter Boilerplate Generation */
+async function handleGenerateBoilerplate(ctx: any) {
+  await ctx.replyWithChatAction('typing');
+  if (!cachedChallenge) {
+    const news = await fetchAiNews();
+    cachedChallenge = await generateDailyCodingChallenge(news.map((n) => n.title));
   }
-  const card = formatMealLoggedCard(result.meal, result.daily);
-  await ctx.reply(card, { parse_mode: 'Markdown' });
+  const card = formatBoilerplateCard(cachedChallenge);
+  const scaffoldKeyboard = new InlineKeyboard()
+    .text('🌐 Create GitHub Gist', 'scaffold_gist');
+  await ctx.reply(card, { parse_mode: 'HTML', reply_markup: scaffoldKeyboard });
 }
 
-/** 3. Show Active Antigravity Queue */
+/** 3. Show GitHub Streak Status */
+async function showGitHubStreak(ctx: any) {
+  await ctx.replyWithChatAction('typing');
+  const streak = await fetchGitHubStreak();
+  const card = formatStreakCard(streak);
+  await ctx.reply(card, { parse_mode: 'HTML' });
+}
+
+/** 4. Show Active Antigravity Queue */
 async function showQueue(ctx: any) {
   const items = await vault.listQueueItems('pending', 15);
   if (items.length === 0) {
@@ -331,7 +347,7 @@ async function showQueue(ctx: any) {
   );
 }
 
-/** 4. Curate Link or Project Idea */
+/** 5. Curate Link or Project Idea */
 async function handleCuration(
   ctx: any,
   rawText: string,
@@ -366,11 +382,11 @@ async function handleCuration(
   });
 }
 
-/** 5. Natural Reminder Handler */
+/** 6. Natural Reminder Handler */
 async function handleNaturalReminder(ctx: any, text: string, intent: IntentResult) {
   const parsed = extractReminderTime(text);
   const taskText = parsed?.rest || intent.extracted?.reminder_task || text;
-  const dueDate = parsed?.due || new Date(Date.now() + 60 * 60 * 1000); // default 1 hour if unspecified
+  const dueDate = parsed?.due || new Date(Date.now() + 60 * 60 * 1000);
 
   const reminder = await vault.addReminder(ctx.chat.id, taskText, dueDate);
   if (!reminder) {
@@ -384,7 +400,7 @@ async function handleNaturalReminder(ctx: any, text: string, intent: IntentResul
   );
 }
 
-/** 6. Natural Note Handler */
+/** 7. Natural Note Handler */
 async function handleNaturalNote(ctx: any, text: string, intent: IntentResult) {
   const noteContent = intent.extracted?.note_text || text;
   const tags = intent.extracted?.note_tags || [];
@@ -399,7 +415,7 @@ async function handleNaturalNote(ctx: any, text: string, intent: IntentResult) {
   });
 }
 
-/** 7. Show Notes List */
+/** 8. Show Notes List */
 async function showNotes(ctx: any) {
   const notes = await vault.listNotes(ctx.chat.id);
   if (notes.length === 0) {
@@ -410,7 +426,7 @@ async function showNotes(ctx: any) {
   await ctx.reply(`📋 *Your Notes:*\n\n${lines.join('\n')}`, { parse_mode: 'Markdown' });
 }
 
-/** 8. Show Upcoming Reminders */
+/** 9. Show Upcoming Reminders */
 async function showReminders(ctx: any) {
   const list = await vault.listUpcomingReminders(ctx.chat.id);
   if (list.length === 0) {
@@ -421,7 +437,7 @@ async function showReminders(ctx: any) {
   await ctx.reply(`⏰ *Upcoming Reminders:*\n\n${lines.join('\n')}`, { parse_mode: 'Markdown' });
 }
 
-/** 9. Conversational Butler Chat */
+/** 10. Conversational Butler Chat */
 async function handleConversationalChat(ctx: any, text: string) {
   const history = await vault.getRecentMessages(ctx.chat.id, 12);
   const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
@@ -436,7 +452,7 @@ async function handleConversationalChat(ctx: any, text: string) {
   } catch (e) {
     if (e instanceof DeepSeekError && e.message.includes('not set')) {
       reply =
-        "⚠️ My AI brain isn't switched on yet — the GEMINI_API_KEY hasn't been configured.\n\nMeanwhile I can still help you with food tracking, curation, and notes, sir.";
+        "⚠️ My AI brain isn't switched on yet — the GEMINI_API_KEY hasn't been configured.\n\nMeanwhile I can still help you with coding challenges, GitHub streaks, curation, and notes, sir.";
     } else {
       console.error('chat failed:', e);
       reply = '⚠️ I hit a snag connecting to the AI brain. Give me a moment and try again, sir!';

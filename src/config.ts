@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Central config — everything comes from environment variables.
  * Vercel sets these in production; .env.local is used for local dev.
  */
@@ -12,6 +12,8 @@ export const config = {
   webhookSecret: process.env.WEBHOOK_SECRET || '',
   cronSecret: process.env.CRON_SECRET || '',
   vaultPat: process.env.VAULT_PAT || '',
+  githubToken: process.env.GITHUB_TOKEN || process.env.VAULT_PAT || '',
+  githubUsername: process.env.GITHUB_USERNAME || 'emmanalcazarjr-ops',
   geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || FALLBACK_GEMINI_KEY,
   deepseekApiKey: process.env.DEEPSEEK_API_KEY || '',
   ownerChatId: process.env.OWNER_CHAT_ID || '',

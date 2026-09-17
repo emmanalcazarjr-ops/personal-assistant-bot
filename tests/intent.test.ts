@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import { fastHeuristicIntent } from '../src/intent.ts';
 
 describe('fastHeuristicIntent', () => {
@@ -14,23 +14,32 @@ describe('fastHeuristicIntent', () => {
   });
 
   it.each([
-    'how many calories left today?',
-    'show me calories',
-    'calories left',
-    'what did I eat today?',
-  ])('classifies %j as food_query', (msg) => {
-    expect(fastHeuristicIntent(msg)?.intent).toBe('food_query');
+    'what should I code today?',
+    'suggest a coding challenge',
+    'daily coding task',
+    'give me an AI coding challenge',
+    'what to code today',
+  ])('classifies %j as coding_challenge', (msg) => {
+    expect(fastHeuristicIntent(msg)?.intent).toBe('coding_challenge');
   });
 
   it.each([
-    'I ate 2 eggs and rice',
-    'had coffee this morning',
-    'eating chicken right now',
-    'for lunch: beef bowl',
-  ])('classifies %j as food_log and keeps the description', (msg) => {
-    const r = fastHeuristicIntent(msg);
-    expect(r?.intent).toBe('food_log');
-    expect(r?.extracted?.food_description).toBe(msg);
+    'generate the boilerplate',
+    'give me starter code',
+    'show boilerplate',
+    'scaffold code',
+  ])('classifies %j as generate_boilerplate', (msg) => {
+    expect(fastHeuristicIntent(msg)?.intent).toBe('generate_boilerplate');
+  });
+
+  it.each([
+    'how is my github streak?',
+    'how is my streak',
+    'github streak',
+    'did I push code today',
+    'check my commits',
+  ])('classifies %j as github_streak', (msg) => {
+    expect(fastHeuristicIntent(msg)?.intent).toBe('github_streak');
   });
 
   it.each([
