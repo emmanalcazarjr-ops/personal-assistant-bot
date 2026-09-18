@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Cron processor: sends the daily briefing.
  * Called by the GitHub Actions workflow at 07:00 Asia/Manila.
  * Protected by CRON_SECRET (Authorization: Bearer <secret>).
@@ -32,7 +32,7 @@ export default async function cronBriefing(req: IncomingMessage, res: ServerResp
   let sent = 0;
   for (const chatId of targets) {
     try {
-      await bot.api.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+      await bot.api.sendMessage(chatId, text, { parse_mode: 'HTML' });
       sent++;
     } catch (e) {
       console.error('briefing send failed', chatId, e);
